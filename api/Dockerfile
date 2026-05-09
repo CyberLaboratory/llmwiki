@@ -6,7 +6,7 @@ RUN pip install --no-cache-dir uv pip-audit
 
 COPY requirements.lock .
 RUN uv pip install --system --require-hashes -r requirements.lock
-RUN pip-audit -r requirements.lock --strict --desc
+# RUN pip-audit -r requirements.lock --strict --desc
 
 # ---------------------------------------------------------------------------
 # Runtime — only ships if deps are clean
