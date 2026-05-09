@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: "Build number tag (e.g. 1.0.0 or 42)"
-        required: true
+        description: "Override version tag (e.g. 1.2.0) — leave blank to auto-bump"
+        required: false
         type: string
 
 env:
@@ -15,9 +15,51 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  version:
+    name: Bump version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.new_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Auto-bump patch version
+        id: auto
+        if: inputs.build_number == ''
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          tag_prefix: v
+
+      - name: Use manual version
+        id: manual
+        if: inputs.build_number != ''
+        run: |
+          TAG="v${{ inputs.build_number }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "new_tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set output tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.build_number }}" ]]; then
+            echo "new_tag=v${{ inputs.build_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_tag=${{ steps.auto.outputs.new_tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
   build-api:
     name: Build & push API image
     runs-on: ubuntu-latest
+    needs: version
     permissions:
       contents: read
       packages: write
@@ -42,8 +84,8 @@ jobs:
         with:
           images: ghcr.io/cyberlaboratory/llmwiki-api
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ inputs.build_number }},enable=${{ inputs.build_number != '' }}
+            type=raw,value=latest
+            type=raw,value=${{ needs.version.outputs.tag }}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push
@@ -59,6 +101,7 @@ jobs:
   build-web:
     name: Build & push Web image
     runs-on: ubuntu-latest
+    needs: version
     permissions:
       contents: read
       packages: write
@@ -83,8 +126,8 @@ jobs:
         with:
           images: ghcr.io/cyberlaboratory/llmwiki-web
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ inputs.build_number }},enable=${{ inputs.build_number != '' }}
+            type=raw,value=latest
+            type=raw,value=${{ needs.version.outputs.tag }}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push
