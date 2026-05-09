@@ -46,8 +46,9 @@ def _row_to_dict(cursor: aiosqlite.Cursor, row: tuple) -> dict:
 
 
 async def create_pool(db_path: str) -> aiosqlite.Connection:
-    db = await aiosqlite.connect(db_path)
+    db = await aiosqlite.connect(db_path, timeout=30)
     db.row_factory = None
+    await db.execute("PRAGMA busy_timeout=10000")
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")
     schema = _SCHEMA_PATH.read_text()
