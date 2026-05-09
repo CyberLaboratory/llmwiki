@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -111,7 +112,18 @@ async def _local_lifespan_inner(app: FastAPI):
     (workspace / ".llmwiki").mkdir(exist_ok=True)
     (workspace / ".llmwiki" / "cache").mkdir(exist_ok=True)
 
-    db_path = str(workspace / ".llmwiki" / "index.db")
+    db_dir = workspace / ".llmwiki"
+    db_path = str(db_dir / "index.db")
+
+    if not db_dir.exists():
+        raise RuntimeError(f"Database directory does not exist: {db_dir}")
+    if not os.access(db_dir, os.W_OK):
+        raise RuntimeError(f"Database directory is not writable: {db_dir}")
+    db_file = db_dir / "index.db"
+    if db_file.exists() and not os.access(db_file, os.W_OK):
+        raise RuntimeError(f"Database file is not writable: {db_file}")
+
+    logger.info("SQLite database path: %s", db_path)
     db = await create_sqlite_pool(db_path)
 
     local_user_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, "local"))
