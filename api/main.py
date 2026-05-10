@@ -186,10 +186,11 @@ async def _local_lifespan(app: FastAPI):
 
 app = FastAPI(title="LLM Wiki API", lifespan=lifespan)
 
+_cors_origins = ["*"] if settings.MODE == "local" else [settings.APP_URL]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.APP_URL],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=settings.MODE != "local",
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[
