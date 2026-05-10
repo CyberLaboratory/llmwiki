@@ -29,7 +29,8 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# chown so the node user (UID 1000) can write temp files during sed -i substitution
+RUN chown -R node:node /app && chmod +x /entrypoint.sh
 EXPOSE 3000
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "server.js"]
