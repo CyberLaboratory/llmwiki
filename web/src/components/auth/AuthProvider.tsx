@@ -80,6 +80,9 @@ export function AuthProvider({ userId, email, children }: AuthProviderProps) {
       })
 
       return () => subscription.unsubscribe()
+    }).catch(() => {
+      // Supabase unavailable (e.g. running in local mode with a hosted image)
+      useKBStore.setState({ knowledgeBases: [], loading: false, error: null })
     })
   }, [userId, email, setUser, setAccessToken, setOnboarded, fetchKBs, router, pathname, signOut])
 
