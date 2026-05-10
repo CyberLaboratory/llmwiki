@@ -2,7 +2,10 @@ import { redirect } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { AuthProvider } from '@/components/auth/AuthProvider'
 
-const isLocal = process.env.NEXT_PUBLIC_MODE === 'local'
+const isLocal =
+  process.env.NEXT_PUBLIC_MODE === 'local' ||
+  !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   if (isLocal) {

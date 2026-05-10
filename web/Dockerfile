@@ -8,7 +8,8 @@ COPY . .
 # image works in any environment — entrypoint.sh replaces them at runtime from
 # the container's env vars (e.g. a Kubernetes ConfigMap).
 ARG NEXT_PUBLIC_API_URL=__NEXT_PUBLIC_API_URL__
-ARG NEXT_PUBLIC_MODE=__NEXT_PUBLIC_MODE__
+#ARG NEXT_PUBLIC_MODE=__NEXT_PUBLIC_MODE__
+ARG NEXT_PUBLIC_MODE=local
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_MCP_URL
