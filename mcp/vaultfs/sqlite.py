@@ -12,7 +12,10 @@ from .base import VaultFS
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_PATH = Path(__file__).parent.parent.parent / "shared" / "sqlite_schema.sql"
+_SCHEMA_PATHS = (
+    Path(__file__).parent.parent.parent / "shared" / "sqlite_schema.sql",
+    Path(__file__).parent.parent / "sqlite_schema.sql",
+)
 
 _db: aiosqlite.Connection | None = None
 _workspace_root: Path | None = None
@@ -37,6 +40,14 @@ def _rows_to_dicts(cursor: aiosqlite.Cursor, rows: list[tuple]) -> list[dict]:
     return results
 
 
+def _schema_sql() -> str:
+    for path in _SCHEMA_PATHS:
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+    searched = ", ".join(str(path) for path in _SCHEMA_PATHS)
+    raise RuntimeError(f"SQLite schema not found. Looked in: {searched}")
+
+
 class SqliteVaultFS(VaultFS):
     """SQLite + local filesystem vault."""
 
@@ -54,9 +65,8 @@ class SqliteVaultFS(VaultFS):
         _db = await aiosqlite.connect(db_path)
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
-        if _SCHEMA_PATH.exists():
-            await _db.executescript(_SCHEMA_PATH.read_text())
-            await _db.commit()
+        await _db.executescript(_schema_sql())
+        await _db.commit()
         logger.info("SQLite initialized: %s", db_path)
 
     @staticmethod

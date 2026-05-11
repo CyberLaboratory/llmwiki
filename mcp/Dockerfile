@@ -15,6 +15,6 @@ FROM base AS runtime
 
 COPY . .
 
-ENV MODE=hosted
+ENV MODE=hosted WORKSPACE_PATH=/workspace
 EXPOSE 8080
-CMD ["python", "-m", "hosted"]
+CMD ["python", "-m", "entrypoint"]

@@ -10,16 +10,15 @@ Usage:
 import argparse
 import asyncio
 import logging
-import os
 import sys
-import uuid
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("llmwiki.local")
 
-_LOCAL_USER_ID = os.environ.get("LLMWIKI_USER_ID", str(uuid.uuid5(uuid.NAMESPACE_DNS, "local")))
-os.environ["SUPAVAULT_USER_ID"] = _LOCAL_USER_ID
+from local_workspace import LOCAL_USER_ID, init_workspace
+
+_LOCAL_USER_ID = LOCAL_USER_ID
 
 
 def _parse_args() -> argparse.Namespace:
@@ -27,49 +26,6 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("workspace", nargs="?", default=".", help="Path to workspace folder")
     parser.add_argument("--workspace", dest="workspace_flag", default=None, help="Path to workspace folder")
     return parser.parse_args()
-
-
-async def _init_workspace(workspace_path: str) -> None:
-    """Initialize workspace: create dirs, SQLite, default workspace row, scaffold wiki files."""
-    ws = Path(workspace_path).resolve()
-
-    (ws / "wiki").mkdir(parents=True, exist_ok=True)
-    (ws / ".llmwiki").mkdir(parents=True, exist_ok=True)
-    (ws / ".llmwiki" / "cache").mkdir(parents=True, exist_ok=True)
-
-    from vaultfs import SqliteVaultFS
-    await SqliteVaultFS.init(str(ws))
-
-    fs = SqliteVaultFS(_LOCAL_USER_ID)
-    existing = await fs.get_workspace()
-    if not existing:
-        ws_name = ws.name
-        ws_id = await fs.ensure_workspace(ws_name)
-
-        await fs.create_document(
-            ws_id, "overview.md", "Overview", "/wiki/", "md",
-            f"This wiki tracks research on {ws_name}.\n\n## Key Findings\n\nNo sources ingested yet.\n\n## Recent Updates\n\nNo activity yet.",
-            ["overview"],
-        )
-        await fs.create_document(
-            ws_id, "log.md", "Log", "/wiki/", "md",
-            "Chronological record of ingests, queries, and maintenance passes.",
-            ["log"],
-        )
-
-        overview_path = ws / "wiki" / "overview.md"
-        if not overview_path.exists():
-            overview_path.write_text(
-                f"This wiki tracks research on {ws_name}.\n\n## Key Findings\n\n"
-                "No sources ingested yet.\n\n## Recent Updates\n\nNo activity yet.\n"
-            )
-        log_path = ws / "wiki" / "log.md"
-        if not log_path.exists():
-            log_path.write_text("Chronological record of ingests, queries, and maintenance passes.\n")
-
-        logger.info("Initialized workspace: %s", ws)
-    else:
-        logger.info("Workspace ready: %s", ws)
 
 
 def main():
@@ -80,7 +36,7 @@ def main():
     sys.modules["local_server"] = sys.modules[__name__]
 
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(_init_workspace(workspace))
+    loop.run_until_complete(init_workspace(workspace))
 
     from mcp.server.fastmcp import FastMCP
     from tools import register
