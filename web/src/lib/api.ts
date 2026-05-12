@@ -1,6 +1,9 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-const WS_URL = API_URL.replace(/^http/, 'ws')
 const isLocal = process.env.NEXT_PUBLIC_MODE === 'local'
+
+// In local mode use relative paths — the Next.js server proxies /v1/* to the
+// API via process.env.API_URL (set from the K8s ConfigMap at runtime).
+// In hosted mode call the external API URL directly from the browser.
+const API_URL = isLocal ? '' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
 
 export async function apiFetch<T>(
   path: string,
@@ -12,7 +15,6 @@ export async function apiFetch<T>(
     ...options?.headers as Record<string, string>,
   }
 
-  // In local mode, skip Authorization header (API doesn't check it)
   if (!isLocal && token) {
     headers.Authorization = `Bearer ${token}`
   }
@@ -30,5 +32,10 @@ export async function apiFetch<T>(
 }
 
 export function getDocumentsWsUrl(kbId: string): string {
-  return `${WS_URL}/v1/ws/documents/${kbId}`
+  if (isLocal && typeof window !== 'undefined') {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${window.location.host}/v1/ws/documents/${kbId}`
+  }
+  const wsBase = API_URL.replace(/^http/, 'ws')
+  return `${wsBase}/v1/ws/documents/${kbId}`
 }
