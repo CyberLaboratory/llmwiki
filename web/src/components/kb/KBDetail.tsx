@@ -171,15 +171,23 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
   const [wikiActivePath, setWikiActivePath] = React.useState<string | null>(null)
   const lastWikiDocNumberRef = React.useRef<number | null>(urlWikiDocNumber)
 
-  // Initialize wikiActivePath from ?p= on mount and when ?p= changes
+  // Sync wikiActivePath from ?p= on mount and when the URL doc number
+  // genuinely changes.  We track which urlWikiDocNumber the effect last
+  // processed so that poll-triggered document refreshes (which create a
+  // new array ref without changing data) cannot re-run this effect with
+  // a stale useSearchParams value and revert the user's selection.
+  const lastResolvedUrlDocRef = React.useRef<number | null>(null)
+
   React.useEffect(() => {
     if (urlWikiDocNumber == null) return
     if (!documents.length) return
+    if (urlWikiDocNumber === lastResolvedUrlDocRef.current) return
     const doc = documents.find((d) => d.document_number === urlWikiDocNumber)
     if (doc) {
       const path = (doc.path + doc.filename).replace(/^\/wiki\/?/, '')
       setWikiActivePath(path)
       lastWikiDocNumberRef.current = urlWikiDocNumber
+      lastResolvedUrlDocRef.current = urlWikiDocNumber
     }
   }, [urlWikiDocNumber, documents])
 

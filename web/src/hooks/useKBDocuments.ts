@@ -28,7 +28,14 @@ export function useKBDocuments(knowledgeBaseId: string) {
         `/v1/knowledge-bases/${knowledgeBaseId}/documents`,
         accessToken,
       )
-      setDocuments(data)
+      setDocuments((prev) => {
+        if (
+          prev.length === data.length &&
+          prev.every((d, i) => d.id === data[i].id && d.version === data[i].version)
+        )
+          return prev
+        return data
+      })
     } catch (err) {
       console.error('Failed to load documents:', err)
     }
