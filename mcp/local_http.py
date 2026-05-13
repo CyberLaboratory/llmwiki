@@ -7,6 +7,7 @@ from pathlib import Path
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -80,6 +81,7 @@ mcp = FastMCP(
         "notes, and documents that you can read, search, edit, and organize. "
         "Call the `guide` tool first to see available knowledge bases and learn the full workflow."
     ),
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
 
 
