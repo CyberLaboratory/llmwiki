@@ -227,8 +227,8 @@ The health check is `GET /health`. The MCP streamable HTTP endpoint is served by
 
 If you want to run the hosted version (like [llmwiki.app](https://llmwiki.app)) with Postgres, Supabase auth, and S3:
 
-<details>
-<summary>Hosted setup instructions</summary>
+
+# Hosted setup instructions
 
 ### Prerequisites
 
@@ -339,7 +339,7 @@ The Docker image defaults to hosted mode and dispatches based on `MODE`. Use `MO
 | `PORT` | `8080` | Uvicorn listen port. The server binds `0.0.0.0:$PORT`. |
 | `MCP_URL` | _(none)_ | The MCP server's own base URL (used by hosted auth/resource metadata). |
 
-</details>
+
 
 ## Why this beats a static notes folder
 

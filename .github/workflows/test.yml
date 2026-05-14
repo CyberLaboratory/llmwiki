@@ -28,7 +28,7 @@ jobs:
           pip install -r tests/requirements.txt cryptography
 
       - name: Run API unit tests
-        run: PYTHONPATH=api pytest tests/unit/test_chunker.py tests/unit/test_helpers.py tests/unit/test_pdf_extract.py -v
+        run: PYTHONPATH=api pytest tests/unit/test_chunker.py tests/unit/test_graph.py tests/unit/test_helpers.py tests/unit/test_pdf_extract.py -v
 
       - name: Run MCP unit tests
         working-directory: mcp

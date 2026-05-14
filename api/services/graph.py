@@ -47,6 +47,17 @@ def _build_edge(r: dict) -> dict:
     }
 
 
+async def _fetch_sqlite_dicts(db, sql: str, params: tuple = ()) -> list[dict]:
+    """Fetch SQLite rows as dicts when the connection uses tuple rows."""
+    cursor = await db.execute(sql, params)
+    try:
+        rows = await cursor.fetchall()
+        columns = [d[0] for d in cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
+    finally:
+        await cursor.close()
+
+
 # ── Hosted (asyncpg) ──
 
 async def get_graph_hosted(conn, kb_id, user_id: str) -> dict:
@@ -152,7 +163,8 @@ async def rebuild_hosted(conn, kb_id, user_id: str) -> dict:
 
 async def get_graph_local(db, user_id: str) -> dict:
     """Return {nodes, edges} for the knowledge graph viewer (SQLite)."""
-    doc_rows = await db.execute_fetchall(
+    doc_rows = await _fetch_sqlite_dicts(
+        db,
         "SELECT id, filename, title, path, file_type, source_kind, metadata, tags "
         "FROM documents WHERE user_id = ? AND status != 'failed'",
         (user_id,),
@@ -160,31 +172,32 @@ async def get_graph_local(db, user_id: str) -> dict:
 
     doc_ids = {r["id"] for r in doc_rows}
 
-    ref_rows = await db.execute_fetchall(
+    ref_rows = await _fetch_sqlite_dicts(
+        db,
         "SELECT source_document_id, target_document_id, reference_type, page "
         "FROM document_references",
     )
 
     return {
-        "nodes": [_build_node(dict(r)) for r in doc_rows],
-        "edges": [_build_edge(dict(r)) for r in ref_rows
+        "nodes": [_build_node(r) for r in doc_rows],
+        "edges": [_build_edge(r) for r in ref_rows
                   if r["source_document_id"] in doc_ids and r["target_document_id"] in doc_ids],
     }
 
 
 async def rebuild_local(db, user_id: str) -> dict:
     """Parse wiki pages and rebuild reference edges atomically (SQLite)."""
-    all_docs = [
-        dict(r) for r in await db.execute_fetchall(
-            "SELECT id, filename, title, path, file_type, source_kind "
-            "FROM documents WHERE user_id = ?",
-            (user_id,),
-        )
-    ]
+    all_docs = await _fetch_sqlite_dicts(
+        db,
+        "SELECT id, filename, title, path, file_type, source_kind "
+        "FROM documents WHERE user_id = ?",
+        (user_id,),
+    )
 
     filename_to_doc, base_to_doc, wiki_path_to_doc = build_lookup_maps(all_docs)
 
-    wiki_pages = await db.execute_fetchall(
+    wiki_pages = await _fetch_sqlite_dicts(
+        db,
         "SELECT id, filename, path, content FROM documents "
         "WHERE user_id = ? AND source_kind = 'wiki' AND file_type = 'md' AND content IS NOT NULL",
         (user_id,),

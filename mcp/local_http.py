@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -21,6 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger("llmwiki.local_http")
 
 _DEFAULT_WORKSPACE_PATH = "/workspace"
+_LOCAL_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
 
 
 def _workspace_path() -> Path:
@@ -30,6 +32,58 @@ def _workspace_path() -> Path:
     if settings.WORKSPACE_PATH and settings.WORKSPACE_PATH != ".":
         return Path(settings.WORKSPACE_PATH).resolve()
     return Path(_DEFAULT_WORKSPACE_PATH).resolve()
+
+
+def _csv_values(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _allowed_host_values(raw: str) -> list[str]:
+    hosts: list[str] = []
+    for value in _csv_values(raw):
+        if "://" in value:
+            pattern = _host_pattern_from_url(value)
+            if pattern:
+                hosts.append(pattern)
+        elif ":" not in value:
+            hosts.append(f"{value}:*")
+        else:
+            hosts.append(value)
+    return hosts
+
+
+def _host_pattern_from_url(raw_url: str) -> str | None:
+    host = urlparse(raw_url).hostname
+    if not host:
+        return None
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{host}:*"
+
+
+def _default_allowed_hosts() -> list[str]:
+    hosts = list(_LOCAL_ALLOWED_HOSTS)
+    for raw_url in (settings.MCP_URL, os.environ.get("NEXT_PUBLIC_MCP_URL", "")):
+        pattern = _host_pattern_from_url(raw_url)
+        if pattern and pattern not in hosts:
+            hosts.append(pattern)
+    return hosts
+
+
+def _transport_security_settings() -> TransportSecuritySettings:
+    allowed_hosts = (
+        _allowed_host_values(os.environ.get("MCP_ALLOWED_HOSTS", ""))
+        or _default_allowed_hosts()
+    )
+    allowed_origins = _csv_values(os.environ.get("MCP_ALLOWED_ORIGINS", ""))
+    if not allowed_origins:
+        allowed_origins = [f"http://{host}" for host in allowed_hosts]
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
 
 class WorkspaceInitASGI:
@@ -76,12 +130,13 @@ class WorkspaceInitASGI:
 
 mcp = FastMCP(
     name="LLM Wiki",
+    host="0.0.0.0",
     instructions=(
         "You are connected to a local LLM Wiki workspace. The user has uploaded files, "
         "notes, and documents that you can read, search, edit, and organize. "
         "Call the `guide` tool first to see available knowledge bases and learn the full workflow."
     ),
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    transport_security=_transport_security_settings(),
 )
 
 
