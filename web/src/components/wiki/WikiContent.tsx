@@ -8,7 +8,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import type { Components } from 'react-markdown'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { FileText, Copy, Download, Check, Network } from 'lucide-react'
+import { FileText, Copy, Download, Check, Network, Link2, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api'
 import { useUserStore } from '@/stores'
@@ -339,6 +339,99 @@ function WikiImage({
   )
 }
 
+interface BacklinkNode {
+  id: string
+  title: string
+  path: string
+  source_kind: string
+}
+
+function BacklinksPanel({
+  docId,
+  kbId,
+  onNavigate,
+}: {
+  docId: string
+  kbId: string
+  onNavigate: (path: string) => void
+}) {
+  const token = useUserStore((s) => s.accessToken)
+  const [expanded, setExpanded] = React.useState(false)
+  const [backlinks, setBacklinks] = React.useState<BacklinkNode[] | null>(null)
+  const [loading, setLoading] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!expanded || backlinks !== null || !token) return
+    setLoading(true)
+    apiFetch<{ nodes: BacklinkNode[]; edges: { source: string; target: string }[] }>(
+      `/v1/knowledge-bases/${kbId}/graph`,
+      token,
+    )
+      .then((data) => {
+        const nodeMap = new Map(data.nodes.map((n) => [n.id, n]))
+        const incoming = data.edges
+          .filter((e) => e.target === docId)
+          .map((e) => nodeMap.get(e.source))
+          .filter((n): n is BacklinkNode => n !== undefined && n.source_kind === 'wiki')
+        setBacklinks(incoming)
+      })
+      .catch(() => setBacklinks([]))
+      .finally(() => setLoading(false))
+  }, [expanded, docId, kbId, token, backlinks])
+
+  // Reset when doc changes
+  React.useEffect(() => {
+    setBacklinks(null)
+    setExpanded(false)
+  }, [docId])
+
+  return (
+    <div className="mt-10 pt-6 border-t border-border/60">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-2 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors cursor-pointer group"
+      >
+        <Link2 className="size-3.5" />
+        <span>Linked from</span>
+        <ChevronRight
+          className={cn(
+            'size-3 transition-transform duration-150',
+            expanded && 'rotate-90',
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="mt-2">
+          {loading && (
+            <p className="text-xs text-muted-foreground/40 pl-1">Loading...</p>
+          )}
+          {!loading && backlinks !== null && backlinks.length === 0 && (
+            <p className="text-xs text-muted-foreground/40 pl-1">No pages link here yet.</p>
+          )}
+          {!loading && backlinks && backlinks.length > 0 && (
+            <ul className="space-y-0.5">
+              {backlinks.map((link) => {
+                const wikiPath = link.path.replace(/^\/wiki\/?/, '')
+                return (
+                  <li key={link.id}>
+                    <button
+                      onClick={() => onNavigate(wikiPath)}
+                      className="flex items-center gap-2 w-full text-left text-sm px-1 py-1 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    >
+                      <FileText className="size-3.5 shrink-0 opacity-40" />
+                      <span className="truncate">{link.title}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface WikiContentProps {
   content: string
   title: string
@@ -346,9 +439,11 @@ interface WikiContentProps {
   onSourceClick?: (filename: string, page?: number) => void
   onGraphClick?: () => void
   documents?: DocumentListItem[]
+  activeDocId?: string | null
+  kbId?: string
 }
 
-export function WikiContent({ content, title, onNavigate, onSourceClick, onGraphClick, documents }: WikiContentProps) {
+export function WikiContent({ content, title, onNavigate, onSourceClick, onGraphClick, documents, activeDocId, kbId }: WikiContentProps) {
   const processedContent = React.useMemo(() => stripLeadingH1(content, title), [content, title])
   const tocItems = React.useMemo(() => extractTocFromMarkdown(processedContent), [processedContent])
   const footnoteSources = React.useMemo(() => parseFootnoteSources(processedContent), [processedContent])
@@ -732,6 +827,14 @@ export function WikiContent({ content, title, onNavigate, onSourceClick, onGraph
                 {processedContent}
               </ReactMarkdown>
             </div>
+
+            {activeDocId && kbId && (
+              <BacklinksPanel
+                docId={activeDocId}
+                kbId={kbId}
+                onNavigate={onNavigate}
+              />
+            )}
           </div>
 
           {/* Right sidebar — "On this page" ToC */}

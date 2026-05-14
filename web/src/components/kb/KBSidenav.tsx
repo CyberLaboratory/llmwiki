@@ -1,17 +1,23 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronRight, FileText, NotepadText, Library,
   Upload, BookOpen, ArrowUpRight, Search as SearchIcon,
   Lightbulb, Box, ScrollText, Network, Folder,
+  Plus, MoreHorizontal, Pencil, FolderInput, LayoutGrid,
 } from 'lucide-react'
 import {
   CommandDialog, CommandInput, CommandList, CommandItem,
   CommandEmpty, CommandGroup, CommandSeparator,
 } from '@/components/ui/command'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { WikiSelector } from '@/components/kb/WikiSelector'
 import { SidenavUserMenu } from '@/components/kb/SidenavUserMenu'
@@ -26,7 +32,6 @@ interface Usage {
   max_pages: number
   max_storage_bytes: number
 }
-
 
 interface KBSidenavProps {
   kbId: string
@@ -43,6 +48,10 @@ interface KBSidenavProps {
   graphViewActive: boolean
   onGraphToggle: () => void
   onOpenSourceDoc: (docId: string) => void
+  onCreateWikiNote: (title: string, folder: string) => void
+  onRenameWikiNote: (path: string, newTitle: string) => void
+  onMoveWikiNote: (path: string, newFolder: string) => void
+  wikiSubfolders: string[]
 }
 
 export function KBSidenav({
@@ -60,8 +69,25 @@ export function KBSidenav({
   graphViewActive,
   onGraphToggle,
   onOpenSourceDoc,
+  onCreateWikiNote,
+  onRenameWikiNote,
+  onMoveWikiNote,
+  wikiSubfolders,
 }: KBSidenavProps) {
   const [searchOpen, setSearchOpen] = React.useState(false)
+
+  // New Note dialog state
+  const [newNoteOpen, setNewNoteOpen] = React.useState(false)
+  const [newNoteTitle, setNewNoteTitle] = React.useState('')
+  const [newNoteFolder, setNewNoteFolder] = React.useState('')
+
+  // Rename dialog state
+  const [renameState, setRenameState] = React.useState<{ path: string; title: string } | null>(null)
+  const [renameValue, setRenameValue] = React.useState('')
+
+  // Move dialog state
+  const [moveState, setMoveState] = React.useState<{ path: string } | null>(null)
+  const [moveFolder, setMoveFolder] = React.useState('')
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -113,10 +139,43 @@ export function KBSidenav({
 
   const sourceCount = sourceDocs.length
 
+  const handleNewNoteSubmit = () => {
+    if (!newNoteTitle.trim()) return
+    onCreateWikiNote(newNoteTitle.trim(), newNoteFolder.trim())
+    setNewNoteOpen(false)
+    setNewNoteTitle('')
+    setNewNoteFolder('')
+  }
+
+  const handleRenameSubmit = () => {
+    if (!renameState || !renameValue.trim()) return
+    onRenameWikiNote(renameState.path, renameValue.trim())
+    setRenameState(null)
+    setRenameValue('')
+  }
+
+  const handleMoveSubmit = () => {
+    if (!moveState) return
+    onMoveWikiNote(moveState.path, moveFolder.trim())
+    setMoveState(null)
+    setMoveFolder('')
+  }
+
   return (
     <div className="h-full flex flex-col border-r border-border">
+      {/* Back to all wikis */}
+      <div className="shrink-0 px-3 pt-2.5 pb-0">
+        <Link
+          href="/wikis"
+          className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+        >
+          <LayoutGrid className="size-2.5" />
+          All Wikis
+        </Link>
+      </div>
+
       {/* Wiki selector */}
-      <div className="shrink-0 px-2 pt-2 pb-1">
+      <div className="shrink-0 px-2 pt-1 pb-1">
         <WikiSelector kbId={kbId} kbName={kbName} />
       </div>
 
@@ -213,6 +272,10 @@ export function KBSidenav({
           )}
           <CommandSeparator />
           <CommandGroup heading="Actions">
+            <CommandItem onSelect={() => { setSearchOpen(false); setNewNoteOpen(true) }}>
+              <Plus className="size-3.5 mr-2 opacity-50" />
+              New Wiki Note
+            </CommandItem>
             <CommandItem onSelect={() => { setSearchOpen(false); onFilesToggle() }}>
               <Folder className="size-3.5 mr-2 opacity-50" />
               Browse Files
@@ -228,9 +291,16 @@ export function KBSidenav({
       {/* Wiki tree */}
       <div className="flex-1 min-h-0 flex flex-col px-2 pt-1">
         <div className="flex items-center px-2 mb-1 shrink-0">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 flex-1">
             Wiki
           </span>
+          <button
+            onClick={() => setNewNoteOpen(true)}
+            className="p-0.5 rounded text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
+            title="New wiki note"
+          >
+            <Plus className="size-3" />
+          </button>
         </div>
         {loading ? (
           <SidenavSkeleton lines={3} />
@@ -243,6 +313,8 @@ export function KBSidenav({
                 depth={0}
                 activePath={wikiActivePath}
                 onNavigate={onWikiNavigate}
+                onRenameRequest={(path, title) => { setRenameState({ path, title }); setRenameValue(title) }}
+                onMoveRequest={(path) => { setMoveState({ path }); setMoveFolder('') }}
               />
             ))}
           </div>
@@ -263,7 +335,7 @@ export function KBSidenav({
         )}
       </div>
 
-      {/* Sources button — separated from passive info below */}
+      {/* Sources button */}
       <div className="shrink-0 px-2 pb-1">
         <button
           onClick={onFilesToggle}
@@ -286,6 +358,124 @@ export function KBSidenav({
       <div className="shrink-0 border-t border-border p-2">
         <SidenavUserMenu />
       </div>
+
+      {/* New Note dialog */}
+      <Dialog open={newNoteOpen} onOpenChange={(v) => { setNewNoteOpen(v); if (!v) { setNewNoteTitle(''); setNewNoteFolder('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New wiki note</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Title</label>
+              <input
+                value={newNoteTitle}
+                onChange={(e) => setNewNoteTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleNewNoteSubmit()}
+                placeholder="My note title"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Folder (optional)</label>
+              <input
+                list="wiki-folders"
+                value={newNoteFolder}
+                onChange={(e) => setNewNoteFolder(e.target.value)}
+                placeholder="concepts, entities, ..."
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              />
+              <datalist id="wiki-folders">
+                {wikiSubfolders.map((f) => <option key={f} value={f} />)}
+              </datalist>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setNewNoteOpen(false)}
+              className="rounded-lg border border-input px-4 py-2 text-sm font-medium hover:bg-accent cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleNewNoteSubmit}
+              disabled={!newNoteTitle.trim()}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              Create
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename dialog */}
+      <Dialog open={!!renameState} onOpenChange={(v) => { if (!v) setRenameState(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename note</DialogTitle>
+          </DialogHeader>
+          <input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit()}
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+            autoFocus
+          />
+          <DialogFooter>
+            <button
+              onClick={() => setRenameState(null)}
+              className="rounded-lg border border-input px-4 py-2 text-sm font-medium hover:bg-accent cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRenameSubmit}
+              disabled={!renameValue.trim()}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              Rename
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move dialog */}
+      <Dialog open={!!moveState} onOpenChange={(v) => { if (!v) setMoveState(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move note</DialogTitle>
+          </DialogHeader>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">New folder (leave blank for wiki root)</label>
+            <input
+              list="wiki-folders-move"
+              value={moveFolder}
+              onChange={(e) => setMoveFolder(e.target.value)}
+              placeholder="concepts, entities, ..."
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              autoFocus
+            />
+            <datalist id="wiki-folders-move">
+              {wikiSubfolders.map((f) => <option key={f} value={f} />)}
+            </datalist>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setMoveState(null)}
+              className="rounded-lg border border-input px-4 py-2 text-sm font-medium hover:bg-accent cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleMoveSubmit}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 cursor-pointer"
+            >
+              Move
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -307,6 +497,7 @@ function SidenavSkeleton({ lines }: { lines: number }) {
 function wikiNodeIcon(node: WikiNode, depth: number) {
   const slug = node.path?.replace(/\.(md|txt|json)$/, '').split('/')[0] ?? ''
   const titleLower = node.title.toLowerCase()
+  const hasChildren = node.children && node.children.length > 0
 
   if (slug === 'overview' || (depth === 0 && titleLower === 'overview'))
     return <BookOpen className="size-3 shrink-0 opacity-60" />
@@ -316,6 +507,9 @@ function wikiNodeIcon(node: WikiNode, depth: number) {
     return <Lightbulb className="size-3 shrink-0 opacity-60" />
   if (slug === 'entities' || (depth === 0 && titleLower === 'entities'))
     return <Box className="size-3 shrink-0 opacity-60" />
+
+  if (hasChildren)
+    return <Folder className="size-3 shrink-0 opacity-50" />
 
   if (depth > 0)
     return <FileText className="size-3 shrink-0 opacity-40" />
@@ -328,27 +522,34 @@ function WikiTreeNode({
   depth,
   activePath,
   onNavigate,
+  onRenameRequest,
+  onMoveRequest,
 }: {
   node: WikiNode
   depth: number
   activePath: string | null
   onNavigate: (path: string, docNumber?: number | null) => void
+  onRenameRequest: (path: string, title: string) => void
+  onMoveRequest: (path: string) => void
 }) {
   const hasChildren = node.children && node.children.length > 0
   const isActive = node.path != null && node.path === activePath
   const hasActiveChild = hasChildren && node.children!.some((c) => c.path === activePath)
   const [expanded, setExpanded] = React.useState(true)
+  const [hovered, setHovered] = React.useState(false)
 
   return (
     <div>
       <div
         className={cn(
-          'flex items-center gap-1.5 w-full text-left text-[13px] rounded-md px-2 py-1.5 transition-colors cursor-pointer',
+          'group flex items-center gap-1.5 w-full text-left text-[13px] rounded-md px-2 py-1.5 transition-colors cursor-pointer',
           isActive
             ? 'bg-accent text-foreground font-medium'
             : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
         )}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         onClick={() => {
           if (node.path) {
             onNavigate(node.path, node.docNumber)
@@ -375,6 +576,40 @@ function WikiTreeNode({
         )}
         {wikiNodeIcon(node, depth)}
         <span className="truncate flex-1 min-w-0">{node.title}</span>
+
+        {/* Context menu — shown on hover for leaf nodes with a path */}
+        {node.path && hovered && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="p-0.5 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors cursor-pointer shrink-0"
+              >
+                <MoreHorizontal className="size-3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRenameRequest(node.path!, node.title)
+                }}
+              >
+                <Pencil className="size-3.5 mr-2 opacity-60" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onMoveRequest(node.path!)
+                }}
+              >
+                <FolderInput className="size-3.5 mr-2 opacity-60" />
+                Move
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       <AnimatePresence initial={false}>
         {hasChildren && (expanded || hasActiveChild) && (
@@ -384,7 +619,6 @@ function WikiTreeNode({
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
             style={{ overflow: 'hidden' }}
-            className=""
           >
             {node.children!.map((child, i) => (
               <WikiTreeNode
@@ -393,6 +627,8 @@ function WikiTreeNode({
                 depth={depth + 1}
                 activePath={activePath}
                 onNavigate={onNavigate}
+                onRenameRequest={onRenameRequest}
+                onMoveRequest={onMoveRequest}
               />
             ))}
           </motion.div>
@@ -473,4 +709,3 @@ function PageUsageBar() {
     </>
   )
 }
-

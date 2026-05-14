@@ -22,59 +22,56 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 function buildTreeFromDocs(docs: DocumentListItem[]): WikiNode[] {
   const sorted = [...docs].sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999))
-  const topLevel: Array<{ title: string; path: string; slug: string; docNumber: number | null }> = []
-  const childPages = new Map<string, Array<{ title: string; path: string; docNumber: number | null }>>()
+
+  type FolderEntry = { doc?: DocumentListItem; children: Map<string, FolderEntry> }
+  const root: FolderEntry = { children: new Map() }
 
   for (const doc of sorted) {
     const relative = (doc.path + doc.filename).replace(/^\/wiki\/?/, '')
-    const parts = relative.split('/')
-    const title =
-      doc.title ||
-      parts[parts.length - 1].replace(/\.(md|txt|json)$/, '').replace(/[-_]/g, ' ')
+    const parts = relative.split('/').filter(Boolean)
+    if (parts.length === 0) continue
 
-    if (parts.length === 1) {
-      const slug = parts[0].replace(/\.(md|txt|json)$/, '')
-      topLevel.push({ title, path: relative, slug, docNumber: doc.document_number })
-    } else {
-      const folder = parts[0]
-      if (!childPages.has(folder)) childPages.set(folder, [])
-      childPages.get(folder)!.push({ title, path: relative, docNumber: doc.document_number })
+    let current = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      const segment = parts[i]
+      if (!current.children.has(segment)) {
+        current.children.set(segment, { children: new Map() })
+      }
+      current = current.children.get(segment)!
     }
-  }
-
-  const tree: WikiNode[] = []
-  const usedFolders = new Set<string>()
-
-  for (const parent of topLevel) {
-    const children = childPages.get(parent.slug)
-    if (children && children.length > 0) {
-      usedFolders.add(parent.slug)
-      tree.push({
-        title: parent.title, path: parent.path, docNumber: parent.docNumber,
-        children: children.map((c) => ({ title: c.title, path: c.path, docNumber: c.docNumber })),
-      })
-    } else {
-      tree.push({ title: parent.title, path: parent.path, docNumber: parent.docNumber })
+    const filename = parts[parts.length - 1]
+    if (!current.children.has(filename)) {
+      current.children.set(filename, { children: new Map() })
     }
+    current.children.get(filename)!.doc = doc
   }
 
-  for (const [folder, children] of childPages) {
-    if (usedFolders.has(folder)) continue
-    const folderTitle = folder.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-    tree.push({ title: folderTitle, children: children.map((c) => ({ title: c.title, path: c.path, docNumber: c.docNumber })) })
+  function sortNodes(nodes: WikiNode[]): WikiNode[] {
+    return nodes.sort((a, b) => {
+      const sa = a.path?.split('/')[0]?.replace(/\.(md|txt|json)$/, '') ?? a.title.toLowerCase()
+      const sb = b.path?.split('/')[0]?.replace(/\.(md|txt|json)$/, '') ?? b.title.toLowerCase()
+      if (sa === 'overview') return -1
+      if (sb === 'overview') return 1
+      if (sa === 'log') return 1
+      if (sb === 'log') return -1
+      return a.title.localeCompare(b.title)
+    })
   }
 
-  const slug = (n: WikiNode) => n.path?.replace(/\.(md|txt|json)$/, '').split('/')[0] ?? ''
-  tree.sort((a, b) => {
-    const sa = slug(a), sb = slug(b)
-    if (sa === 'overview') return -1
-    if (sb === 'overview') return 1
-    if (sa === 'log') return 1
-    if (sb === 'log') return -1
-    return a.title.localeCompare(b.title)
-  })
+  function toNodes(entry: FolderEntry, name: string): WikiNode {
+    const doc = entry.doc
+    const title = doc?.title || name.replace(/\.(md|txt|json)$/, '').replace(/[-_]/g, ' ')
+    const path = doc ? (doc.path + doc.filename).replace(/^\/wiki\/?/, '') : undefined
+    const childEntries = Array.from(entry.children.entries())
 
-  return tree
+    if (childEntries.length > 0) {
+      const children = sortNodes(childEntries.map(([k, v]) => toNodes(v, k)))
+      return { title, path, docNumber: doc?.document_number, children }
+    }
+    return { title, path, docNumber: doc?.document_number }
+  }
+
+  return sortNodes(Array.from(root.children.entries()).map(([k, v]) => toNodes(v, k)))
 }
 
 function enrichTreeWithDocNumbers(tree: WikiNode[], docs: DocumentListItem[]): WikiNode[] {
@@ -518,7 +515,40 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
   )
 
 
+  // ─── Wiki subfolders (for new-note / move dropdowns) ─────────
+  const wikiSubfolders = React.useMemo(() => {
+    const folders = new Set<string>()
+    for (const doc of wikiDocs) {
+      const rel = doc.path.replace(/^\/wiki\/?/, '').replace(/\/$/, '')
+      if (rel) folders.add(rel)
+    }
+    return Array.from(folders).sort()
+  }, [wikiDocs])
+
   // ─── Document CRUD ───────────────────────────────────────────
+  const handleCreateWikiNote = async (title: string, folder: string) => {
+    const t = getToken()
+    if (!t || !userId) return
+    const slug = title.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '')
+    const filename = slug ? `${slug}.md` : 'untitled.md'
+    const wikiPath = folder.trim() ? `/wiki/${folder.trim().replace(/^\/|\/$/g, '')}/` : '/wiki/'
+    try {
+      const data = await apiFetch<DocumentListItem>(`/v1/knowledge-bases/${kbId}/documents/note`, t, {
+        method: 'POST',
+        body: JSON.stringify({ filename, title, path: wikiPath }),
+      })
+      setDocuments((prev) => [data, ...prev])
+      // Navigate to the new wiki note
+      const relative = (data.path + data.filename).replace(/^\/wiki\/?/, '')
+      setActiveView('wiki')
+      setWikiActivePath(relative)
+      if (data.document_number != null) updateParam('p', String(data.document_number))
+      navigateToView('wiki', { searchParams: data.document_number != null ? { p: String(data.document_number) } : undefined })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create note')
+    }
+  }
+
   const handleCreateNote = async (targetPath: string = '/') => {
     const t = getToken()
     if (!t || !userId) return
@@ -571,6 +601,21 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
       await apiFetch(`/v1/documents/${docId}`, t, { method: 'DELETE' })
       setDocuments((prev) => prev.filter((d) => d.id !== docId))
     } catch { toast.error('Failed to delete document') }
+  }
+
+  const handleRenameWikiNote = async (wikiPath: string, newTitle: string) => {
+    const doc = wikiDocs.find((d) => (d.path + d.filename).replace(/^\/wiki\/?/, '') === wikiPath)
+    if (!doc) return
+    return handleRenameDocument(doc.id, newTitle)
+  }
+
+  const handleMoveWikiNote = async (wikiPath: string, newFolder: string) => {
+    const doc = wikiDocs.find((d) => (d.path + d.filename).replace(/^\/wiki\/?/, '') === wikiPath)
+    if (!doc) return
+    const targetPath = newFolder.trim()
+      ? `/wiki/${newFolder.trim().replace(/^\/|\/$/g, '')}/`
+      : '/wiki/'
+    return handleMoveDocument(doc.id, targetPath)
   }
 
   const handleRenameDocument = async (docId: string, newTitle: string) => {
@@ -782,6 +827,10 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
             graphViewActive={graphViewActive}
             onGraphToggle={handleGraphToggle}
             onOpenSourceDoc={handleOpenSourceDoc}
+            onCreateWikiNote={handleCreateWikiNote}
+            onRenameWikiNote={handleRenameWikiNote}
+            onMoveWikiNote={handleMoveWikiNote}
+            wikiSubfolders={wikiSubfolders}
           />
         </div>
         <div className="flex-1 min-w-0">
@@ -866,6 +915,8 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
                   onSourceClick={handleCitationSourceClick}
                   onGraphClick={handlePageGraphClick}
                   documents={documents}
+                  activeDocId={activeWikiDocId}
+                  kbId={kbId}
                 />
               </motion.div>
             ) : (
