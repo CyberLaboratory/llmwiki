@@ -5,6 +5,7 @@ Tests every VaultFS method. Self-contained — no Postgres needed.
 
 import pytest
 from tests.integration.mcp.conftest import TEST_USER_ID
+from vaultfs.base import DocumentVersionConflict
 
 
 class TestWorkspace:
@@ -27,6 +28,14 @@ class TestWorkspace:
         assert len(kbs) == 1
         assert kbs[0]["name"] == "test-workspace"
         assert kbs[0]["slug"] == "test-workspace"
+
+    async def test_sqlite_busy_timeout_enabled(self, fs):
+        from vaultfs.sqlite import SqliteVaultFS
+
+        db = SqliteVaultFS._db_or_raise()
+        cursor = await db.execute("PRAGMA busy_timeout")
+        row = await cursor.fetchone()
+        assert row[0] == 30000
 
 
 class TestDocumentCRUD:
@@ -76,6 +85,18 @@ class TestDocumentCRUD:
         instance, kb_id = fs
         doc = await instance.create_document(kb_id, "notes.md", "Notes", "/", "md", "v1", ["tag"])
         await instance.update_document(str(doc["id"]), "v2")
+        fetched = await instance.get_document(kb_id, "notes.md", "/")
+        assert fetched["content"] == "v2"
+        assert fetched["version"] == 1
+
+    async def test_update_document_rejects_stale_expected_version(self, fs):
+        instance, kb_id = fs
+        doc = await instance.create_document(kb_id, "notes.md", "Notes", "/", "md", "v1", ["tag"])
+        await instance.update_document(str(doc["id"]), "v2", expected_version=0)
+
+        with pytest.raises(DocumentVersionConflict):
+            await instance.update_document(str(doc["id"]), "v3", expected_version=0)
+
         fetched = await instance.get_document(kb_id, "notes.md", "/")
         assert fetched["content"] == "v2"
         assert fetched["version"] == 1

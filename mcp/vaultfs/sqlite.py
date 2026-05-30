@@ -1,5 +1,7 @@
 """SQLite + local filesystem implementation of VaultFS."""
 
+import asyncio
+from contextlib import asynccontextmanager
 import json
 import logging
 import os
@@ -8,7 +10,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .base import VaultFS
+from .base import DocumentVersionConflict, VaultFS
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,9 @@ _SCHEMA_PATHS = (
 
 _db: aiosqlite.Connection | None = None
 _workspace_root: Path | None = None
+_write_lock: asyncio.Lock | None = None
+_write_owner: asyncio.Task | None = None
+_write_depth = 0
 
 
 def _rows_to_dicts(cursor: aiosqlite.Cursor, rows: list[tuple]) -> list[dict]:
@@ -58,11 +63,15 @@ class SqliteVaultFS(VaultFS):
     @staticmethod
     async def init(workspace_path: str) -> None:
         """Initialize the SQLite connection and workspace root for the given path."""
-        global _db, _workspace_root
+        global _db, _workspace_root, _write_lock, _write_owner, _write_depth
         _workspace_root = Path(workspace_path).resolve()
         db_path = os.path.join(workspace_path, ".llmwiki", "index.db")
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        _db = await aiosqlite.connect(db_path)
+        _db = await aiosqlite.connect(db_path, timeout=30)
+        _write_lock = asyncio.Lock()
+        _write_owner = None
+        _write_depth = 0
+        await _db.execute("PRAGMA busy_timeout=30000")
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
         await _db.executescript(_schema_sql())
@@ -71,16 +80,52 @@ class SqliteVaultFS(VaultFS):
 
     @staticmethod
     async def close() -> None:
-        global _db
+        global _db, _write_lock, _write_owner, _write_depth
         if _db:
             await _db.close()
             _db = None
+        _write_lock = None
+        _write_owner = None
+        _write_depth = 0
 
     @staticmethod
     def _db_or_raise() -> aiosqlite.Connection:
         if _db is None:
             raise RuntimeError("SQLite not initialized — call SqliteVaultFS.init() first")
         return _db
+
+    @asynccontextmanager
+    async def write_transaction(self):
+        """Serialize writes and wrap them in a single SQLite transaction."""
+        global _write_depth, _write_owner
+
+        db = self._db_or_raise()
+        if _write_lock is None:
+            raise RuntimeError("SQLite write lock not initialized")
+
+        task = asyncio.current_task()
+        if task is not None and _write_owner is task:
+            _write_depth += 1
+            try:
+                yield
+            finally:
+                _write_depth -= 1
+            return
+
+        async with _write_lock:
+            _write_owner = task
+            _write_depth = 1
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+            except Exception:
+                await db.rollback()
+                raise
+            else:
+                await db.commit()
+            finally:
+                _write_depth = 0
+                _write_owner = None
 
 
     async def resolve_kb(self, slug: str) -> dict | None:
@@ -128,60 +173,67 @@ class SqliteVaultFS(VaultFS):
         return rows[0] if rows else None
 
     async def create_document(self, kb_id: str, filename: str, title: str, dir_path: str, file_type: str, content: str, tags: list[str], date: str | None = None, metadata: dict | None = None) -> dict:
-        db = self._db_or_raise()
-        doc_id = str(uuid.uuid4())
-        relative_path = (dir_path.rstrip("/") + "/" + filename).lstrip("/")
-        source_kind = "wiki" if dir_path.strip("/").startswith("wiki") else "source"
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            doc_id = str(uuid.uuid4())
+            relative_path = (dir_path.rstrip("/") + "/" + filename).lstrip("/")
+            source_kind = "wiki" if dir_path.strip("/").startswith("wiki") else "source"
 
-        cursor = await db.execute("SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents")
-        row = await cursor.fetchone()
-        doc_number = row[0]
+            cursor = await db.execute("SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents")
+            row = await cursor.fetchone()
+            doc_number = row[0]
 
-        await db.execute(
-            "INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, "
-            "file_type, status, content, tags, date, metadata, version, document_number) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, 0, ?)",
-            (doc_id, self.user_id, filename, title, dir_path, relative_path, source_kind,
-             file_type, content, json.dumps(tags), date,
-             json.dumps(metadata) if metadata else None, doc_number),
-        )
-        await db.commit()
-        return {"id": doc_id, "filename": filename, "path": dir_path}
+            await db.execute(
+                "INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, "
+                "file_type, status, content, tags, date, metadata, version, document_number) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, 0, ?)",
+                (doc_id, self.user_id, filename, title, dir_path, relative_path, source_kind,
+                 file_type, content, json.dumps(tags), date,
+                 json.dumps(metadata) if metadata else None, doc_number),
+            )
+            return {"id": doc_id, "filename": filename, "path": dir_path}
 
-    async def update_document(self, doc_id: str, content: str, tags: list[str] | None = None, title: str | None = None, date: str | None = None, metadata: dict | None = None) -> dict | None:
-        db = self._db_or_raise()
-        sets = ["content = ?", "version = version + 1", "updated_at = datetime('now')"]
-        args: list = [content]
+    async def update_document(self, doc_id: str, content: str, tags: list[str] | None = None, title: str | None = None, date: str | None = None, metadata: dict | None = None, expected_version: int | None = None) -> dict | None:
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            sets = ["content = ?", "version = version + 1", "updated_at = datetime('now')"]
+            args: list = [content]
 
-        if title is not None:
-            sets.append("title = ?")
-            args.append(title)
-        if tags is not None:
-            sets.append("tags = ?")
-            args.append(json.dumps(tags))
-        if date is not None:
-            sets.append("date = ?")
-            args.append(date)
-        if metadata is not None:
-            sets.append("metadata = ?")
-            args.append(json.dumps(metadata))
+            if title is not None:
+                sets.append("title = ?")
+                args.append(title)
+            if tags is not None:
+                sets.append("tags = ?")
+                args.append(json.dumps(tags))
+            if date is not None:
+                sets.append("date = ?")
+                args.append(date)
+            if metadata is not None:
+                sets.append("metadata = ?")
+                args.append(json.dumps(metadata))
 
-        args.append(doc_id)
-        await db.execute(
-            f"UPDATE documents SET {', '.join(sets)} WHERE id = ?",
-            tuple(args),
-        )
-        await db.commit()
-        return None
+            args.append(doc_id)
+            where = "id = ?"
+            if expected_version is not None:
+                where += " AND version = ?"
+                args.append(expected_version)
+
+            cursor = await db.execute(
+                f"UPDATE documents SET {', '.join(sets)} WHERE {where}",
+                tuple(args),
+            )
+            if expected_version is not None and cursor.rowcount == 0:
+                raise DocumentVersionConflict(f"Document {doc_id} changed before update")
+            return None
 
     async def archive_documents(self, doc_ids: list[str]) -> int:
-        db = self._db_or_raise()
         if not doc_ids:
             return 0
-        placeholders = ",".join("?" for _ in doc_ids)
-        cursor = await db.execute(f"DELETE FROM documents WHERE id IN ({placeholders})", doc_ids)
-        await db.commit()
-        return cursor.rowcount
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            placeholders = ",".join("?" for _ in doc_ids)
+            cursor = await db.execute(f"DELETE FROM documents WHERE id IN ({placeholders})", doc_ids)
+            return cursor.rowcount
 
 
     async def list_documents(self, kb_id: str) -> list[dict]:
@@ -269,7 +321,13 @@ class SqliteVaultFS(VaultFS):
         if not file_path:
             return False
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
+        tmp_path = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            tmp_path.replace(file_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
         return True
 
     def delete_from_disk(self, docs: list[dict]) -> None:
@@ -289,34 +347,34 @@ class SqliteVaultFS(VaultFS):
 
 
     async def delete_references(self, source_doc_id: str) -> None:
-        db = self._db_or_raise()
-        await db.execute("DELETE FROM document_references WHERE source_document_id = ?", (source_doc_id,))
-        await db.commit()
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            await db.execute("DELETE FROM document_references WHERE source_document_id = ?", (source_doc_id,))
 
     async def upsert_reference(self, source_id: str, target_id: str, kb_id: str, ref_type: str, page: int | None) -> None:
-        db = self._db_or_raise()
-        try:
-            await db.execute(
-                "INSERT OR REPLACE INTO document_references "
-                "(source_document_id, target_document_id, reference_type, page) "
-                "VALUES (?, ?, ?, ?)",
-                (source_id, target_id, ref_type, page),
-            )
-            await db.commit()
-        except Exception as e:
-            logger.warning("Failed to insert reference %s -> %s: %s", source_id[:8], target_id[:8], e)
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            try:
+                await db.execute(
+                    "INSERT OR REPLACE INTO document_references "
+                    "(source_document_id, target_document_id, reference_type, page) "
+                    "VALUES (?, ?, ?, ?)",
+                    (source_id, target_id, ref_type, page),
+                )
+            except Exception as e:
+                logger.warning("Failed to insert reference %s -> %s: %s", source_id[:8], target_id[:8], e)
 
     async def propagate_staleness(self, doc_id: str) -> None:
-        db = self._db_or_raise()
-        await db.execute(
-            "UPDATE documents SET stale_since = datetime('now') "
-            "WHERE id IN ("
-            "  SELECT source_document_id FROM document_references "
-            "  WHERE target_document_id = ? AND reference_type = 'links_to'"
-            ") AND stale_since IS NULL",
-            (doc_id,),
-        )
-        await db.commit()
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            await db.execute(
+                "UPDATE documents SET stale_since = datetime('now') "
+                "WHERE id IN ("
+                "  SELECT source_document_id FROM document_references "
+                "  WHERE target_document_id = ? AND reference_type = 'links_to'"
+                ") AND stale_since IS NULL",
+                (doc_id,),
+            )
 
     async def get_backlinks(self, doc_id: str) -> list[dict]:
         db = self._db_or_raise()
@@ -370,15 +428,15 @@ class SqliteVaultFS(VaultFS):
 
     async def ensure_workspace(self, workspace_name: str) -> str:
         """Ensure a workspace row exists. Returns the workspace ID."""
-        db = self._db_or_raise()
-        cursor = await db.execute("SELECT id FROM workspace LIMIT 1")
-        row = await cursor.fetchone()
-        if row:
-            return row[0]
-        ws_id = str(uuid.uuid4())
-        await db.execute(
-            "INSERT INTO workspace (id, name, description, user_id) VALUES (?, ?, '', ?)",
-            (ws_id, workspace_name, self.user_id),
-        )
-        await db.commit()
-        return ws_id
+        async with self.write_transaction():
+            db = self._db_or_raise()
+            cursor = await db.execute("SELECT id FROM workspace LIMIT 1")
+            row = await cursor.fetchone()
+            if row:
+                return row[0]
+            ws_id = str(uuid.uuid4())
+            await db.execute(
+                "INSERT INTO workspace (id, name, description, user_id) VALUES (?, ?, '', ?)",
+                (ws_id, workspace_name, self.user_id),
+            )
+            return ws_id

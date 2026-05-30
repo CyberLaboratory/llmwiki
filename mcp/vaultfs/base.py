@@ -1,10 +1,24 @@
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
+
+
+class DocumentVersionConflict(RuntimeError):
+    """Raised when a document update loses an optimistic version race."""
 
 
 class VaultFS(ABC):
     """Abstract virtual filesystem for the knowledge vault."""
 
     user_id: str
+
+    @asynccontextmanager
+    async def write_transaction(self):
+        """Serialize a logical write operation.
+
+        Implementations that do not need local write serialization can use
+        this default no-op transaction guard.
+        """
+        yield
 
     @abstractmethod
     async def resolve_kb(self, slug: str) -> dict | None: ...
@@ -22,7 +36,7 @@ class VaultFS(ABC):
     async def create_document(self, kb_id: str, filename: str, title: str, dir_path: str, file_type: str, content: str, tags: list[str], date: str | None = None, metadata: dict | None = None) -> dict: ...
 
     @abstractmethod
-    async def update_document(self, doc_id: str, content: str, tags: list[str] | None = None, title: str | None = None, date: str | None = None, metadata: dict | None = None) -> dict | None: ...
+    async def update_document(self, doc_id: str, content: str, tags: list[str] | None = None, title: str | None = None, date: str | None = None, metadata: dict | None = None, expected_version: int | None = None) -> dict | None: ...
 
     @abstractmethod
     async def archive_documents(self, doc_ids: list[str]) -> int: ...

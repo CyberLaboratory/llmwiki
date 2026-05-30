@@ -8,6 +8,7 @@ from typing import Literal
 from mcp.server.fastmcp import FastMCP, Context
 
 from vaultfs import VaultFS
+from vaultfs.base import DocumentVersionConflict
 from .helpers import deep_link, resolve_path
 from .references import update_references
 
@@ -66,82 +67,97 @@ class WriteHandler:
         filename, file_type = self._title_to_filename(title)
         title = self._humanize_title(title)
 
-        existing = await self.fs.get_document(self.kb_id, filename, dir_path)
+        async with self.fs.write_transaction():
+            existing = await self.fs.get_document(self.kb_id, filename, dir_path)
 
-        if existing and not overwrite:
-            return (
-                f"Error: `{dir_path}{filename}` already exists. "
-                f"Use `command=\"str_replace\"` to edit it, or pass `overwrite=true` to replace it entirely."
-            )
+            if existing and not overwrite:
+                return (
+                    f"Error: `{dir_path}{filename}` already exists. "
+                    f"Use `command=\"str_replace\"` to edit it, or pass `overwrite=true` to replace it entirely."
+                )
 
-        if not self.fs.write_to_disk(dir_path, filename, content):
-            return f"Error: invalid path `{dir_path.lstrip('/') + filename}`"
+            if not self.fs.write_to_disk(dir_path, filename, content):
+                return f"Error: invalid path `{dir_path.lstrip('/') + filename}`"
 
-        # Extract date + description from frontmatter
-        meta = _parse_frontmatter(content)
-        fm_date, fm_metadata = _extract_metadata(meta)
+            # Extract date + description from frontmatter
+            meta = _parse_frontmatter(content)
+            fm_date, fm_metadata = _extract_metadata(meta)
 
-        if existing:
-            await self.fs.update_document(str(existing["id"]), content, tags, title=title, date=fm_date, metadata=fm_metadata)
-            doc = existing
-        else:
-            doc = await self.fs.create_document(self.kb_id, filename, title, dir_path, file_type, content, tags, date=fm_date, metadata=fm_metadata)
+            if existing:
+                await self.fs.update_document(
+                    str(existing["id"]), content, tags, title=title,
+                    date=fm_date, metadata=fm_metadata,
+                    expected_version=existing.get("version"),
+                )
+                doc = existing
+            else:
+                doc = await self.fs.create_document(self.kb_id, filename, title, dir_path, file_type, content, tags, date=fm_date, metadata=fm_metadata)
 
-        doc_id = str(doc["id"])
-        await self._sync_references(doc_id, content, dir_path, file_type)
+            doc_id = str(doc["id"])
+            await self._sync_references(doc_id, content, dir_path, file_type)
 
-        impact = await self._get_wiki_impact(doc_id, dir_path)
-        return self._format_create_response(title, tags, dir_path, filename, file_type, date_str) + impact
+            impact = await self._get_wiki_impact(doc_id, dir_path)
+            return self._format_create_response(title, tags, dir_path, filename, file_type, date_str) + impact
 
     async def edit(self, path: str, old_text: str, new_text: str, tags: list[str] | None) -> str:
         """Replace exact text in an existing document."""
         if not old_text:
             return "Error: old_text is required for str_replace."
 
-        dir_path, filename = resolve_path(path)
-        doc = await self.fs.get_document(self.kb_id, filename, dir_path)
-        if not doc:
-            return f"Document '{path}' not found."
+        async with self.fs.write_transaction():
+            dir_path, filename = resolve_path(path)
+            doc = await self.fs.get_document(self.kb_id, filename, dir_path)
+            if not doc:
+                return f"Document '{path}' not found."
 
-        content = doc.get("content") or doc.get("content", "") or ""
-        error = self._validate_single_match(content, old_text)
-        if error:
-            return error
+            content = doc.get("content") or doc.get("content", "") or ""
+            error = self._validate_single_match(content, old_text)
+            if error:
+                return error
 
-        replace_start = content.index(old_text)
-        new_content = content.replace(old_text, new_text, 1)
+            replace_start = content.index(old_text)
+            new_content = content.replace(old_text, new_text, 1)
 
-        self.fs.write_to_disk(dir_path, filename, new_content)
-        meta = _parse_frontmatter(new_content)
-        fm_date, fm_metadata = _extract_metadata(meta)
-        await self.fs.update_document(str(doc["id"]), new_content, tags, date=fm_date, metadata=fm_metadata)
+            self.fs.write_to_disk(dir_path, filename, new_content)
+            meta = _parse_frontmatter(new_content)
+            fm_date, fm_metadata = _extract_metadata(meta)
+            await self.fs.update_document(
+                str(doc["id"]), new_content, tags,
+                date=fm_date, metadata=fm_metadata,
+                expected_version=doc.get("version"),
+            )
 
-        doc_id = str(doc["id"])
-        await self._sync_references(doc_id, new_content, dir_path)
+            doc_id = str(doc["id"])
+            await self._sync_references(doc_id, new_content, dir_path)
 
-        snippet = self._extract_context(new_content, replace_start, len(new_text))
-        impact = await self._get_wiki_impact(doc_id, dir_path)
-        return self._format_edit_response(path, dir_path, filename, snippet) + impact
+            snippet = self._extract_context(new_content, replace_start, len(new_text))
+            impact = await self._get_wiki_impact(doc_id, dir_path)
+            return self._format_edit_response(path, dir_path, filename, snippet) + impact
 
     async def append(self, path: str, content: str, tags: list[str] | None) -> str:
         """Append content to the end of an existing document."""
-        dir_path, filename = resolve_path(path)
-        doc = await self.fs.get_document(self.kb_id, filename, dir_path)
-        if not doc:
-            return f"Document '{path}' not found."
+        async with self.fs.write_transaction():
+            dir_path, filename = resolve_path(path)
+            doc = await self.fs.get_document(self.kb_id, filename, dir_path)
+            if not doc:
+                return f"Document '{path}' not found."
 
-        new_content = (doc.get("content") or "") + "\n\n" + content
+            new_content = (doc.get("content") or "") + "\n\n" + content
 
-        self.fs.write_to_disk(dir_path, filename, new_content)
-        meta = _parse_frontmatter(new_content)
-        fm_date, fm_metadata = _extract_metadata(meta)
-        await self.fs.update_document(str(doc["id"]), new_content, tags, date=fm_date, metadata=fm_metadata)
+            self.fs.write_to_disk(dir_path, filename, new_content)
+            meta = _parse_frontmatter(new_content)
+            fm_date, fm_metadata = _extract_metadata(meta)
+            await self.fs.update_document(
+                str(doc["id"]), new_content, tags,
+                date=fm_date, metadata=fm_metadata,
+                expected_version=doc.get("version"),
+            )
 
-        doc_id = str(doc["id"])
-        await self._sync_references(doc_id, new_content, dir_path)
+            doc_id = str(doc["id"])
+            await self._sync_references(doc_id, new_content, dir_path)
 
-        impact = await self._get_wiki_impact(doc_id, dir_path)
-        return self._format_append_response(path, dir_path, filename) + impact
+            impact = await self._get_wiki_impact(doc_id, dir_path)
+            return self._format_append_response(path, dir_path, filename) + impact
 
     async def _sync_references(self, doc_id: str, content: str, dir_path: str, file_type: str = "md") -> None:
         """Update citation graph and propagate staleness for wiki pages."""
@@ -298,11 +314,14 @@ def register(mcp: FastMCP, get_user_id, fs_factory) -> None:
 
         handler = WriteHandler(fs, kb)
 
-        if command == "create":
-            return await handler.create(path, title, content, tags or [], date_str, overwrite)
-        elif command == "str_replace":
-            return await handler.edit(path, old_text, new_text, tags)
-        elif command == "append":
-            return await handler.append(path, content, tags)
+        try:
+            if command == "create":
+                return await handler.create(path, title, content, tags or [], date_str, overwrite)
+            elif command == "str_replace":
+                return await handler.edit(path, old_text, new_text, tags)
+            elif command == "append":
+                return await handler.append(path, content, tags)
+        except DocumentVersionConflict:
+            return "Error: document changed while this write was in progress. Read it again and retry."
 
         return f"Unknown command: {command}"

@@ -4,6 +4,8 @@ Tests the full flow through WriteHandler, ReadHandler, SearchHandler, DeleteHand
 Uses SqliteVaultFS with a temp workspace — no Postgres needed.
 """
 
+import asyncio
+
 import pytest
 from tests.integration.mcp.conftest import TEST_USER_ID
 
@@ -130,6 +132,30 @@ class TestWriteReadFlow:
         content = await reader.read("log.md", "", None, False)
         assert "Entry 1" in content
         assert "Entry 2" in content
+
+    async def test_concurrent_appends_are_serialized(self, fs):
+        instance, kb_id = fs
+        from tools.write import WriteHandler
+        from tools.read import ReadHandler
+
+        kb = _make_kb(kb_id)
+        writer = WriteHandler(instance, kb)
+        reader = ReadHandler(instance, kb)
+
+        await writer.create("/", "Concurrent", "Start", ["test"], "", False)
+
+        async def append_entry(i: int) -> str:
+            return await writer.append("concurrent.md", f"Entry {i}", None)
+
+        results = await asyncio.gather(*(append_entry(i) for i in range(25)))
+        assert all("Appended" in result for result in results)
+
+        content = await reader.read("concurrent.md", "", None, False)
+        for i in range(25):
+            assert f"Entry {i}" in content
+
+        doc = await instance.get_document(kb_id, "concurrent.md", "/")
+        assert doc["version"] == 25
 
     async def test_append_missing_document(self, fs):
         instance, kb_id = fs

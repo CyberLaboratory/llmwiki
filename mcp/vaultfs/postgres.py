@@ -6,7 +6,7 @@ import aioboto3
 
 from config import settings
 from db import scoped_query, scoped_queryrow, scoped_execute, service_queryrow, service_execute
-from .base import VaultFS
+from .base import DocumentVersionConflict, VaultFS
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class PostgresVaultFS(VaultFS):
             date, _json.dumps(metadata) if metadata else None,
         )
 
-    async def update_document(self, doc_id: str, content: str, tags: list[str] | None = None, title: str | None = None, date: str | None = None, metadata: dict | None = None) -> dict | None:
+    async def update_document(self, doc_id: str, content: str, tags: list[str] | None = None, title: str | None = None, date: str | None = None, metadata: dict | None = None, expected_version: int | None = None) -> dict | None:
         import json as _json
         # Build SET clauses dynamically based on what's provided
         sets = ["content = $1", "version = version + 1", "updated_at = now()"]
@@ -99,10 +99,19 @@ class PostgresVaultFS(VaultFS):
             idx += 1
 
         sql = f"UPDATE documents SET {', '.join(sets)} WHERE id = $2 AND user_id = $3"
+        if expected_version is not None:
+            sql += f" AND version = ${idx}"
+            args.append(expected_version)
+            idx += 1
         if title is not None:
             sql += " RETURNING id, filename, path"
-            return await service_queryrow(sql, *args)
-        await service_execute(sql, *args)
+            row = await service_queryrow(sql, *args)
+            if expected_version is not None and row is None:
+                raise DocumentVersionConflict(f"Document {doc_id} changed before update")
+            return row
+        result = await service_execute(sql, *args)
+        if expected_version is not None and result == "UPDATE 0":
+            raise DocumentVersionConflict(f"Document {doc_id} changed before update")
         return None
 
     async def archive_documents(self, doc_ids: list[str]) -> int:

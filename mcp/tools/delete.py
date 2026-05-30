@@ -26,23 +26,24 @@ class DeleteHandler:
         if not path or path in ("*", "**", "**/*"):
             return "Error: refusing to delete everything. Use a more specific path."
 
-        matched = await self._find_documents(path)
-        if not matched:
-            return f"No documents matching `{path}` found in {self.slug}."
+        async with self.fs.write_transaction():
+            matched = await self._find_documents(path)
+            if not matched:
+                return f"No documents matching `{path}` found in {self.slug}."
 
-        protected = [d for d in matched if _is_protected(d)]
-        deletable = [d for d in matched if not _is_protected(d)]
+            protected = [d for d in matched if _is_protected(d)]
+            deletable = [d for d in matched if not _is_protected(d)]
 
-        if not deletable:
-            names = ", ".join(f"`{d['path']}{d['filename']}`" for d in protected)
-            return f"Cannot delete {names} — these are structural wiki pages. Use `write` to edit their content instead."
+            if not deletable:
+                names = ", ".join(f"`{d['path']}{d['filename']}`" for d in protected)
+                return f"Cannot delete {names} — these are structural wiki pages. Use `write` to edit their content instead."
 
-        self.fs.delete_from_disk(deletable)
+            self.fs.delete_from_disk(deletable)
 
-        doc_ids = [str(d["id"]) for d in deletable]
-        deleted_count = await self.fs.archive_documents(doc_ids)
+            doc_ids = [str(d["id"]) for d in deletable]
+            deleted_count = await self.fs.archive_documents(doc_ids)
 
-        return self._format_response(deleted_count or len(deletable), deletable, protected)
+            return self._format_response(deleted_count or len(deletable), deletable, protected)
 
     async def _find_documents(self, path: str) -> list[dict]:
         """Find documents by exact path or glob pattern."""
