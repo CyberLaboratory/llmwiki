@@ -7,7 +7,7 @@ import {
   ChevronRight, FileText, NotepadText, Library,
   Upload, BookOpen, ArrowUpRight, Search as SearchIcon,
   Lightbulb, Box, ScrollText, Network, Folder,
-  Plus, MoreHorizontal, Pencil, FolderInput, LayoutGrid,
+  Plus, Pencil, FolderInput, LayoutGrid,
 } from 'lucide-react'
 import {
   CommandDialog, CommandInput, CommandList, CommandItem,
@@ -15,9 +15,8 @@ import {
 } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu'
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem,
+} from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import { WikiSelector } from '@/components/kb/WikiSelector'
 import { SidenavUserMenu } from '@/components/kb/SidenavUserMenu'
@@ -536,104 +535,83 @@ function WikiTreeNode({
   const isActive = node.path != null && node.path === activePath
   const hasActiveChild = hasChildren && node.children!.some((c) => c.path === activePath)
   const [expanded, setExpanded] = React.useState(true)
-  const [hovered, setHovered] = React.useState(false)
 
   return (
     <div>
-      <div
-        className={cn(
-          'group flex items-center gap-1.5 w-full text-left text-[13px] rounded-md px-2 py-1.5 transition-colors cursor-pointer',
-          isActive
-            ? 'bg-accent text-foreground font-medium'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
-        )}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onClick={() => {
-          if (node.path) {
-            onNavigate(node.path, node.docNumber)
-          } else if (hasChildren) {
-            const first = node.children!.find((c) => c.path)
-            if (first) onNavigate(first.path!, first.docNumber)
-          }
-        }}
-      >
-        {hasChildren ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); setExpanded((prev) => !prev) }}
-            className="p-0.5 -ml-0.5 cursor-pointer"
-          >
-            <ChevronRight
-              className={cn(
-                'size-2.5 transition-transform duration-150',
-                expanded && 'rotate-90',
-              )}
-            />
-          </button>
-        ) : (
-          <span className="w-3.5" />
-        )}
-        {wikiNodeIcon(node, depth)}
-        <span className="truncate flex-1 min-w-0">{node.title}</span>
-
-        {/* Context menu — shown on hover for leaf nodes with a path */}
-        {node.path && hovered && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="p-0.5 rounded text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors cursor-pointer shrink-0"
-              >
-                <MoreHorizontal className="size-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-36">
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRenameRequest(node.path!, node.title)
-                }}
-              >
-                <Pencil className="size-3.5 mr-2 opacity-60" />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onMoveRequest(node.path!)
-                }}
-              >
-                <FolderInput className="size-3.5 mr-2 opacity-60" />
-                Move
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-      <AnimatePresence initial={false}>
-        {hasChildren && (expanded || hasActiveChild) && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
-            style={{ overflow: 'hidden' }}
-          >
-            {node.children!.map((child, i) => (
-              <WikiTreeNode
-                key={child.path ?? child.title ?? i}
-                node={child}
-                depth={depth + 1}
-                activePath={activePath}
-                onNavigate={onNavigate}
-                onRenameRequest={onRenameRequest}
-                onMoveRequest={onMoveRequest}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            'group flex items-center gap-1.5 w-full text-left text-[13px] rounded-md px-2 py-1.5 transition-colors cursor-pointer',
+            isActive
+              ? 'bg-accent text-foreground font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+          )}
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          onClick={() => {
+            if (node.path) {
+              onNavigate(node.path, node.docNumber)
+            } else if (hasChildren) {
+              const first = node.children!.find((c) => c.path)
+              if (first) onNavigate(first.path!, first.docNumber)
+            }
+          }}
+        >
+          {hasChildren ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpanded((prev) => !prev) }}
+              className="p-0.5 -ml-0.5 cursor-pointer"
+            >
+              <ChevronRight
+                className={cn(
+                  'size-2.5 transition-transform duration-150',
+                  expanded && 'rotate-90',
+                )}
               />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </button>
+          ) : (
+            <span className="w-3.5" />
+          )}
+          {wikiNodeIcon(node, depth)}
+          <span className="truncate flex-1 min-w-0">{node.title}</span>
+        </div>
+      </ContextMenuTrigger>
+      {node.path && (
+        <ContextMenuContent className="w-36">
+          <ContextMenuItem onClick={() => onRenameRequest(node.path!, node.title)}>
+            <Pencil className="size-3.5 mr-2 opacity-60" />
+            Rename
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => onMoveRequest(node.path!)}>
+            <FolderInput className="size-3.5 mr-2 opacity-60" />
+            Move
+          </ContextMenuItem>
+        </ContextMenuContent>
+      )}
+    </ContextMenu>
+    <AnimatePresence initial={false}>
+      {hasChildren && (expanded || hasActiveChild) && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+          style={{ overflow: 'hidden' }}
+        >
+          {node.children!.map((child, i) => (
+            <WikiTreeNode
+              key={child.path ?? child.title ?? i}
+              node={child}
+              depth={depth + 1}
+              activePath={activePath}
+              onNavigate={onNavigate}
+              onRenameRequest={onRenameRequest}
+              onMoveRequest={onMoveRequest}
+            />
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
     </div>
   )
 }
