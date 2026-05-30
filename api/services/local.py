@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from config import settings
 from domain.watcher import mark_written
-from infra.db.sqlite import SQLiteDocumentRepository, SQLiteChunkRepository
+from infra.db.sqlite import SQLiteDocumentRepository, SQLiteChunkRepository, SQLiteKBRepository
 from services.chunker import chunk_text
 from .base import UserService, KBService, DocumentService, ServiceFactory
 from .types import parse_frontmatter, title_from_filename, extract_tags
@@ -53,47 +53,40 @@ class LocalKBService(KBService):
     def __init__(self, db, user_id: str):
         self.db = db
         self.user_id = user_id
+        self.repo = SQLiteKBRepository(db)
 
     async def list(self) -> list[dict]:
-        cursor = await self.db.execute(
-            "SELECT w.id, w.user_id, w.name, w.name as slug, w.description, "
-            "w.created_at, w.created_at as updated_at, "
-            "(SELECT count(*) FROM documents WHERE source_kind != 'wiki' AND status != 'failed') as source_count, "
-            "(SELECT count(*) FROM documents WHERE source_kind = 'wiki' AND status != 'failed') as wiki_page_count "
-            "FROM workspace w",
-        )
-        rows = await cursor.fetchall()
-        cols = [d[0] for d in cursor.description]
-        return [dict(zip(cols, r)) for r in rows]
+        return await self.repo.list_all(self.user_id)
 
     async def get(self, kb_id: str) -> dict | None:
-        kbs = await self.list()
-        return kbs[0] if kbs else None
+        return await self.repo.get(kb_id, self.user_id)
 
     async def create(self, name: str, description: str | None) -> dict:
-        kbs = await self.list()
-        if kbs:
-            return kbs[0]
-        raise HTTPException(status_code=400, detail="No workspace initialized")
+        name = (name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        return await self.repo.create(self.user_id, name, name, description)
 
     async def update(self, kb_id: str, name: str | None, description: str | None) -> dict | None:
-        sets = []
-        params = []
+        fields: dict = {}
         if name is not None:
-            sets.append("name = ?")
-            params.append(name)
+            fields["name"] = name
         if description is not None:
-            sets.append("description = ?")
-            params.append(description)
-        if not sets:
+            fields["description"] = description
+        if not fields:
             return None
-        params.append(kb_id)
-        await self.db.execute(f"UPDATE workspace SET {', '.join(sets)} WHERE id = ?", tuple(params))
-        await self.db.commit()
-        return await self.get(kb_id)
+        return await self.repo.update(kb_id, self.user_id, **fields)
 
     async def delete(self, kb_id: str) -> bool:
-        raise HTTPException(status_code=400, detail="Cannot delete the workspace in local mode")
+        existing = await self.repo.get(kb_id, self.user_id)
+        if not existing:
+            return False
+        if not await self.repo.delete(kb_id, self.user_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete the last workspace",
+            )
+        return True
 
 
 def _workspace_root() -> Path:

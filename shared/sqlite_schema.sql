@@ -7,10 +7,10 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS workspace (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
     description TEXT DEFAULT '',
     user_id TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(user_id)
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS documents (

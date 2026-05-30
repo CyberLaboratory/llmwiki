@@ -54,7 +54,65 @@ async def create_pool(db_path: str) -> aiosqlite.Connection:
     schema = _SCHEMA_PATH.read_text()
     await db.executescript(schema)
     await db.commit()
+    await _migrate(db)
     return db
+
+
+def _slugify(name: str) -> str:
+    s = "".join(c.lower() if c.isalnum() else "-" for c in name).strip("-")
+    while "--" in s:
+        s = s.replace("--", "-")
+    return s or "workspace"
+
+
+async def _migrate(db: aiosqlite.Connection) -> None:
+    """Idempotent schema migrations keyed off PRAGMA user_version."""
+    cursor = await db.execute("PRAGMA user_version")
+    row = await cursor.fetchone()
+    version = row[0] if row else 0
+
+    if version < 2:
+        # v1 -> v2: multi-workspace. Drop UNIQUE(user_id) on workspace and add slug.
+        # SQLite needs a table rebuild to change UNIQUE constraints / add UNIQUE column.
+        # Detect whether the migration is needed by inspecting the existing table.
+        cursor = await db.execute("PRAGMA table_info(workspace)")
+        cols = {r[1] for r in await cursor.fetchall()}
+
+        if "slug" not in cols:
+            await db.execute("BEGIN")
+            try:
+                await db.execute(
+                    "CREATE TABLE workspace_new ("
+                    "id TEXT PRIMARY KEY, "
+                    "name TEXT NOT NULL, "
+                    "slug TEXT NOT NULL UNIQUE, "
+                    "description TEXT DEFAULT '', "
+                    "user_id TEXT NOT NULL, "
+                    "created_at TEXT DEFAULT (datetime('now'))"
+                    ")"
+                )
+                # Backfill slug from name; in single-workspace land there is at most one row.
+                cursor = await db.execute(
+                    "SELECT id, name, description, user_id, created_at FROM workspace"
+                )
+                existing = await cursor.fetchall()
+                for rid, name, desc, uid, created in existing:
+                    slug = _slugify(name)
+                    await db.execute(
+                        "INSERT INTO workspace_new (id, name, slug, description, user_id, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (rid, name, slug, desc or "", uid, created),
+                    )
+                await db.execute("DROP TABLE workspace")
+                await db.execute("ALTER TABLE workspace_new RENAME TO workspace")
+                await db.commit()
+                logger.info("Migrated workspace table to multi-workspace schema (v2)")
+            except Exception:
+                await db.rollback()
+                raise
+
+        await db.execute("PRAGMA user_version = 2")
+        await db.commit()
 
 
 class SQLiteDocumentRepository:
@@ -103,9 +161,9 @@ class SQLiteDocumentRepository:
         self, kb_id: str, user_id: str, filename: str, path: str,
     ) -> dict | None:
         cursor = await self._db.execute(
-            "SELECT * FROM documents WHERE knowledge_base_id = ? AND user_id = ? "
-            "AND filename = ? AND path = ? AND NOT archived",
-            (kb_id, user_id, filename, path),
+            f"SELECT {_DOC_COLUMNS} FROM documents WHERE user_id = ? "
+            "AND filename = ? AND path = ? AND status != 'failed'",
+            (user_id, filename, path),
         )
         row = await cursor.fetchone()
         return _row_to_dict(cursor, row) if row else None
@@ -251,19 +309,21 @@ class SQLiteKBRepository:
         self._db = db
 
     async def list_all(self, user_id: str) -> list[dict]:
+        # NOTE: document counts are still computed globally — proper per-workspace
+        # isolation is the next migration (documents.workspace_id).
         cursor = await self._db.execute(
-            "SELECT w.id, w.user_id, w.name, w.name as slug, w.description, "
+            "SELECT w.id, w.user_id, w.name, w.slug, w.description, "
             "w.created_at, w.created_at as updated_at, "
             "(SELECT count(*) FROM documents WHERE source_kind != 'wiki' AND status != 'failed') as source_count, "
             "(SELECT count(*) FROM documents WHERE source_kind = 'wiki' AND status != 'failed') as wiki_page_count "
-            "FROM workspace w",
+            "FROM workspace w ORDER BY w.created_at",
         )
         rows = await cursor.fetchall()
         return [_row_to_dict(cursor, r) for r in rows]
 
     async def get(self, kb_id: str, user_id: str) -> dict | None:
         cursor = await self._db.execute(
-            "SELECT w.id, w.user_id, w.name, w.name as slug, w.description, "
+            "SELECT w.id, w.user_id, w.name, w.slug, w.description, "
             "w.created_at, w.created_at as updated_at, "
             "(SELECT count(*) FROM documents WHERE source_kind != 'wiki' AND status != 'failed') as source_count, "
             "(SELECT count(*) FROM documents WHERE source_kind = 'wiki' AND status != 'failed') as wiki_page_count "
@@ -275,22 +335,29 @@ class SQLiteKBRepository:
 
     async def get_owner(self, kb_id: str) -> str | None:
         cursor = await self._db.execute(
-            "SELECT user_id FROM workspace LIMIT 1",
+            "SELECT user_id FROM workspace WHERE id = ?", (kb_id,),
         )
         row = await cursor.fetchone()
         return row[0] if row else None
 
     async def create(self, user_id: str, name: str, slug: str, description: str | None) -> dict:
-        # Enforce singleton: return existing workspace if one exists
-        cursor = await self._db.execute("SELECT id FROM workspace LIMIT 1")
-        existing = await cursor.fetchone()
-        if existing:
-            return await self.get(existing[0], user_id)
+        # Ensure slug uniqueness — append a numeric suffix on collision.
+        base_slug = _slugify(slug or name)
+        candidate = base_slug
+        i = 2
+        while True:
+            cursor = await self._db.execute(
+                "SELECT 1 FROM workspace WHERE slug = ?", (candidate,),
+            )
+            if not await cursor.fetchone():
+                break
+            candidate = f"{base_slug}-{i}"
+            i += 1
 
         ws_id = str(uuid.uuid4())
         await self._db.execute(
-            "INSERT INTO workspace (id, name, description, user_id) VALUES (?, ?, ?, ?)",
-            (ws_id, name, description or "", user_id),
+            "INSERT INTO workspace (id, name, slug, description, user_id) VALUES (?, ?, ?, ?, ?)",
+            (ws_id, name, candidate, description or "", user_id),
         )
         await self._db.commit()
         return await self.get(ws_id, user_id)
@@ -313,7 +380,16 @@ class SQLiteKBRepository:
         return await self.get(kb_id, user_id)
 
     async def delete(self, kb_id: str, user_id: str) -> bool:
-        return False  # Cannot delete the workspace KB in local mode
+        # Refuse to delete the last workspace so the app remains usable.
+        cursor = await self._db.execute("SELECT count(*) FROM workspace")
+        row = await cursor.fetchone()
+        if row and row[0] <= 1:
+            return False
+        cursor = await self._db.execute(
+            "DELETE FROM workspace WHERE id = ?", (kb_id,),
+        )
+        await self._db.commit()
+        return (cursor.rowcount or 0) > 0
 
     async def count_users(self) -> int:
         return 1  # Single user in local mode
