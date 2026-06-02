@@ -44,8 +44,7 @@ autodoc2_packages = [
     {"path": "../converter", "module": "converter"},
 ]
 autodoc2_render_plugin = "myst"
-autodoc2_hidden_objects = ["dunder", "private", "inherited"]
-autodoc2_index_template = None  # we provide our own index pages
+autodoc2_hidden_objects = ["dunder", "private"]
 
 # Napoleon — accept Google + NumPy docstring styles for hand-written
 # docstrings that don't use plain reST.

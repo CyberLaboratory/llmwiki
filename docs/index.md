@@ -7,9 +7,7 @@ backend.
 :maxdepth: 2
 :caption: Reference
 
-apidocs/api/api
-apidocs/mcp/mcp
-apidocs/converter/converter
+apidocs/index
 ```
 
 ## Services at a glance
