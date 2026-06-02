@@ -295,6 +295,7 @@ export function KBSidenav({
           </span>
           <button
             onClick={() => setNewNoteOpen(true)}
+            data-testid="new-wiki-note-button"
             className="p-0.5 rounded text-muted-foreground/30 hover:text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
             title="New wiki note"
           >
@@ -541,6 +542,8 @@ function WikiTreeNode({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          data-testid="wiki-tree-node"
+          data-wiki-path={node.path ?? ''}
           className={cn(
             'group flex items-center gap-1.5 w-full text-left text-[13px] rounded-md px-2 py-1.5 transition-colors cursor-pointer',
             isActive

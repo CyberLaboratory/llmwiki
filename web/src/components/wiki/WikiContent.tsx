@@ -819,6 +819,7 @@ export function WikiContent({ content, title, onNavigate, onSourceClick, onGraph
                   {onEdit && (
                     <button
                       onClick={onEdit}
+                      data-testid="edit-wiki-note-button"
                       className="p-1.5 rounded-md text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
                       title="Edit note"
                     >

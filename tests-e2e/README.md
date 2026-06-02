@@ -1,0 +1,51 @@
+# llmwiki end-to-end tests
+
+Playwright suite that runs against a **live llmwiki instance** (default
+`http://llmwiki.lan:30300`). One spec per major feature.
+
+## Setup
+
+```bash
+cd tests-e2e
+npm install
+npm run install-browsers   # one-time chromium download
+```
+
+## Run
+
+```bash
+npm test                   # headless
+npm run test:headed        # watch the browser
+npm run test:ui            # Playwright UI mode
+npm run report             # open the last HTML report
+```
+
+Point at a different instance:
+
+```bash
+LLMWIKI_BASE_URL=http://staging.example.com npm test
+LLMWIKI_FIXTURE_SLUG=my-other-wiki npm test
+```
+
+## Conventions
+
+- **One spec per feature.** File names are numbered to make the run order
+  predictable (`01-…`, `02-…`).
+- **Workers = 1.** The live instance is shared — parallel tests would race on
+  the wiki tree.
+- **Test data is prefixed `e2e-`.** Each run uses unique titles via
+  `uniqueName()` so reruns don't collide. Cleanup is left to the operator; a
+  files-view filter on `e2e-` makes pruning trivial.
+- **No teardown of pre-existing data.** Tests never delete content they didn't
+  create.
+
+## Adding a test when shipping a feature
+
+Per the project policy in [../CLAUDE.md](../CLAUDE.md), every new user-facing
+feature ships with a spec in `tests/`:
+
+1. Add `tests/NN-<feature>.spec.ts`.
+2. Use `data-testid` attributes on new interactive elements rather than CSS
+   classes — they're the contract between source and tests.
+3. Run `npm test` against the live instance and confirm it passes before
+   committing.
