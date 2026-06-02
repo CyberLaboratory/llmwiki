@@ -83,6 +83,16 @@ async function main() {
   }
 
   // ── Build the summary markdown note ────────────────────────────
+  // Collect every other wiki md file so we can cross-link from the
+  // evidence note. Each [text](path.md) link becomes an edge in the
+  // graph once we POST /graph/rebuild below.
+  const otherWikiNotes = docs.filter(
+    (d) =>
+      d.file_type === 'md' &&
+      d.path.startsWith('/wiki/') &&
+      !(d.path === NOTE_PATH && d.filename === NOTE_FILENAME),
+  )
+
   const lines = [
     '# E2E Evidence — latest run',
     '',
@@ -93,23 +103,44 @@ async function main() {
     '',
     '---',
     '',
+    '## Screenshots',
+    '',
   ]
   for (const file of pngs) {
     // Filename like `06-note-edit.passed.png` → "06 note edit" + status badge
     const m = file.match(/^(\d+)-(.+?)\.(passed|failed|interrupted|timedOut|unknown)\.png$/)
     if (!m) {
-      lines.push(`## ${file}`, '', `![${file}](${file})`, '')
+      lines.push(`### ${file}`, '', `![${file}](${file})`, '')
       continue
     }
     const [, num, slug, status] = m
     const heading = slug.replace(/-/g, ' ')
     const badge = status === 'passed' ? '✅ PASSED' : `❌ ${status.toUpperCase()}`
     lines.push(
-      `## ${num}. ${heading} — ${badge}`,
+      `### ${num}. ${heading} — ${badge}`,
       '',
       `![${file}](${file})`,
       '',
     )
+  }
+
+  if (otherWikiNotes.length > 0) {
+    lines.push(
+      '## References',
+      '',
+      'Each link below produces a graph edge from this note. After this',
+      'file is saved the API extracts references and the Graph view',
+      'renders this note as a hub connected to every other wiki page.',
+      '',
+    )
+    for (const doc of otherWikiNotes) {
+      // Build a relative wiki path: doc.path is `/wiki/...`, strip the
+      // `/wiki/` prefix and prepend `./` so refs resolves it correctly.
+      const rel = (doc.path + doc.filename).replace(/^\/wiki\//, './')
+      const label = doc.title || doc.filename.replace(/\.md$/, '')
+      lines.push(`- [${label}](${rel})`)
+    }
+    lines.push('')
   }
 
   const noteContent = lines.join('\n')
@@ -138,12 +169,26 @@ async function main() {
     else console.log(`  ✓ created note ${NOTE_PATH}${NOTE_FILENAME}`)
   }
 
+  // ── Rebuild the references graph so the new links become edges ─
+  const rebuild = await fetch(
+    `${BASE_URL}/v1/knowledge-bases/${kb.id}/graph/rebuild`,
+    { method: 'POST' },
+  )
+  if (!rebuild.ok) {
+    console.warn(`  ! graph rebuild failed: ${rebuild.status} ${await rebuild.text()}`)
+  } else {
+    const result = await rebuild.json().catch(() => ({}))
+    const parts = Object.entries(result).map(([k, v]) => `${k}=${v}`).join(', ')
+    console.log(`  ✓ graph rebuilt (${parts || 'ok'})`)
+  }
+
   const docNum = (await jsonOrThrow(
     await fetch(`${BASE_URL}/v1/knowledge-bases/${kb.id}/documents`),
     'final doc list',
   )).find((d) => d.path === NOTE_PATH && d.filename === NOTE_FILENAME)?.document_number
 
   console.log(`\nBrowse:  ${BASE_URL}/wikis/${KB_SLUG}${docNum != null ? `?p=${docNum}` : ''}`)
+  console.log(`Graph:   ${BASE_URL}/wikis/${KB_SLUG}/graph`)
 }
 
 main().catch((err) => {
