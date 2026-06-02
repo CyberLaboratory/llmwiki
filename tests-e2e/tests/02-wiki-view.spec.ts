@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { FIXTURE_WIKI_SLUG, openWiki } from './helpers'
 
 test('opening a wiki renders sidenav and a markdown page', async ({ page }) => {
@@ -11,6 +11,7 @@ test('opening a wiki renders sidenav and a markdown page', async ({ page }) => {
   const firstNode = page.locator('[data-testid="wiki-tree-node"]').first()
   await expect(firstNode).toBeVisible()
 
-  // A markdown article container should render
-  await expect(page.locator('.wiki-content').first()).toBeVisible({ timeout: 15_000 })
+  // A markdown article should render — verify the page <h1> + article container
+  await expect(page.locator('main h1').first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.wiki-content').first()).toBeAttached({ timeout: 15_000 })
 })

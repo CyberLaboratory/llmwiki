@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { FIXTURE_WIKI_SLUG } from './helpers'
 
 test('landing redirects to /wikis and lists at least the fixture wiki', async ({ page }) => {

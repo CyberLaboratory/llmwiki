@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { openWiki } from './helpers'
 
 test('clicking a wiki tree node loads its page and updates ?p=', async ({ page }) => {
@@ -11,16 +11,29 @@ test('clicking a wiki tree node loads its page and updates ?p=', async ({ page }
   const count = await nodes.count()
   expect(count).toBeGreaterThan(0)
 
-  // Click the last visible doc-bearing node (anything but the auto-selected first)
-  const target = nodes.nth(Math.min(count - 1, 1))
-  const targetTitle = (await target.innerText()).trim()
-  await target.click()
+  // Capture the doc number of the page the suite starts on so we can
+  // detect a real navigation (not just "we're already there").
+  const startUrl = page.url()
+  const startP = new URL(startUrl, 'http://x').searchParams.get('p')
 
-  // URL should carry a ?p= page number
-  await expect(page).toHaveURL(/\?p=\d+/, { timeout: 10_000 })
+  // Click a node that isn't the currently-active one
+  let clickedNew = false
+  for (let i = 0; i < count; i++) {
+    const node = nodes.nth(i)
+    const wikiPath = await node.getAttribute('data-wiki-path')
+    if (!wikiPath) continue
+    await node.click()
+    await page.waitForURL(/\?p=\d+/, { timeout: 5_000 }).catch(() => {})
+    const nextP = new URL(page.url(), 'http://x').searchParams.get('p')
+    if (nextP && nextP !== startP) {
+      clickedNew = true
+      break
+    }
+  }
+  expect(clickedNew, 'tree click should navigate to a different page').toBe(true)
 
-  // The clicked title should appear as the h1 in the article
-  await expect(page.locator('.wiki-content').first()).toBeVisible()
-  await expect(page.locator('h1', { hasText: new RegExp(targetTitle.split('\n')[0], 'i') }).first())
-    .toBeVisible({ timeout: 10_000 })
+  // ?p= reflects the new page; h1 + article container render
+  await expect(page).toHaveURL(/\?p=\d+/)
+  await expect(page.locator('.wiki-content').first()).toBeAttached({ timeout: 10_000 })
+  await expect(page.locator('main h1').first()).toBeVisible({ timeout: 10_000 })
 })

@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { openWiki, uniqueName } from './helpers'
+import { test, expect } from './fixtures'
+import { openWiki, uniqueName, titleMatcher } from './helpers'
 
 test('creating a wiki note adds it to the tree and opens it', async ({ page }) => {
   await openWiki(page)
@@ -18,8 +18,8 @@ test('creating a wiki note adds it to the tree and opens it', async ({ page }) =
   // After creation the dialog closes and the new note becomes active
   await expect(dialog).toBeHidden({ timeout: 10_000 })
 
-  // The new title appears in the tree
+  // The new title appears in the tree (local mode normalizes hyphens → spaces)
   await expect(
-    page.locator('[data-testid="wiki-tree-node"]', { hasText: title }).first(),
+    page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(title) }).first(),
   ).toBeVisible({ timeout: 10_000 })
 })

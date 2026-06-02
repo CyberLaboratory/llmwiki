@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { openWiki, uniqueName } from './helpers'
+import { test, expect } from './fixtures'
+import { openWiki, uniqueName, titleMatcher } from './helpers'
 
 test('right-click → Delete removes the wiki note from the tree', async ({ page }) => {
   await openWiki(page)
@@ -13,7 +13,7 @@ test('right-click → Delete removes the wiki note from the tree', async ({ page
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(dialog).toBeHidden()
 
-  const node = page.locator('[data-testid="wiki-tree-node"]', { hasText: title }).first()
+  const node = page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(title) }).first()
   await expect(node).toBeVisible({ timeout: 10_000 })
 
   // Open context menu → Delete
@@ -23,13 +23,13 @@ test('right-click → Delete removes the wiki note from the tree', async ({ page
   // Confirmation dialog
   dialog = page.getByRole('dialog')
   await expect(dialog.getByText('Delete note')).toBeVisible()
-  await expect(dialog.getByText(title, { exact: false })).toBeVisible()
+  await expect(dialog.getByText(titleMatcher(title))).toBeVisible()
 
   await page.getByTestId('wiki-node-delete-confirm').click()
   await expect(dialog).toBeHidden({ timeout: 10_000 })
 
   // Node is gone from the tree
   await expect(
-    page.locator('[data-testid="wiki-tree-node"]', { hasText: title }),
+    page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(title) }),
   ).toHaveCount(0, { timeout: 10_000 })
 })

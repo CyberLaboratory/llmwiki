@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { openWiki, uniqueName } from './helpers'
+import { test, expect } from './fixtures'
+import { openWiki, uniqueName, titleMatcher } from './helpers'
 
 test('right-click → Move relocates the note under a new folder in the tree', async ({ page }) => {
   await openWiki(page)
@@ -14,7 +14,7 @@ test('right-click → Move relocates the note under a new folder in the tree', a
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(dialog).toBeHidden()
 
-  const node = page.locator('[data-testid="wiki-tree-node"]', { hasText: title }).first()
+  const node = page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(title) }).first()
   await expect(node).toBeVisible({ timeout: 10_000 })
 
   await node.click({ button: 'right' })
@@ -28,6 +28,6 @@ test('right-click → Move relocates the note under a new folder in the tree', a
 
   // After the move the folder node should appear in the tree
   await expect(
-    page.locator('[data-testid="wiki-tree-node"]', { hasText: folder }).first(),
+    page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(folder) }).first(),
   ).toBeVisible({ timeout: 10_000 })
 })

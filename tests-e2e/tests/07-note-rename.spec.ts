@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { openWiki, uniqueName } from './helpers'
+import { test, expect } from './fixtures'
+import { openWiki, uniqueName, titleMatcher } from './helpers'
 
 test('right-click → Rename updates the wiki note title in the tree', async ({ page }) => {
   await openWiki(page)
@@ -14,7 +14,7 @@ test('right-click → Rename updates the wiki note title in the tree', async ({ 
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(dialog).toBeHidden()
 
-  const node = page.locator('[data-testid="wiki-tree-node"]', { hasText: originalTitle }).first()
+  const node = page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(originalTitle) }).first()
   await expect(node).toBeVisible({ timeout: 10_000 })
 
   await node.click({ button: 'right' })
@@ -28,6 +28,6 @@ test('right-click → Rename updates the wiki note title in the tree', async ({ 
   await expect(dialog).toBeHidden({ timeout: 10_000 })
 
   await expect(
-    page.locator('[data-testid="wiki-tree-node"]', { hasText: renamedTitle }).first(),
+    page.locator('[data-testid="wiki-tree-node"]', { hasText: titleMatcher(renamedTitle) }).first(),
   ).toBeVisible({ timeout: 10_000 })
 })

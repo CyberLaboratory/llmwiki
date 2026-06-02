@@ -11,6 +11,17 @@ export function uniqueName(label: string): string {
   return `${E2E_PREFIX}${label}-${Date.now()}-${Math.floor(Math.random() * 1000)}`
 }
 
+/**
+ * Local-mode API derives note titles from the filename slug, replacing
+ * hyphens with spaces and title-casing. This regex matches both the
+ * original slug AND the displayed form, so tests can locate a note by
+ * the unique name they generated without caring which form is rendered.
+ */
+export function titleMatcher(name: string): RegExp {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/-/g, '[-\\s]')
+  return new RegExp(escaped, 'i')
+}
+
 /** Navigate to a wiki and wait for the sidenav tree (or empty state) to render. */
 export async function openWiki(page: Page, slug: string = FIXTURE_WIKI_SLUG): Promise<void> {
   await page.goto(`/wikis/${slug}`)

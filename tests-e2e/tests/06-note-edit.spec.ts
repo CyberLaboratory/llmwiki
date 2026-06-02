@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { openWiki, uniqueName } from './helpers'
+import { test, expect } from './fixtures'
+import { openWiki, uniqueName, titleMatcher } from './helpers'
 
 // Covers the feature added in commit eccd02f: Pencil button on wiki view
 // swaps in NoteEditor for the active doc.
@@ -22,7 +22,7 @@ test('Edit button swaps wiki view into NoteEditor and autosaves', async ({ page 
   // NoteEditor renders a title input (non-embedded mode)
   const titleInput = page.locator('input[placeholder="Untitled"]').first()
   await expect(titleInput).toBeVisible({ timeout: 10_000 })
-  await expect(titleInput).toHaveValue(initialTitle)
+  await expect(titleInput).toHaveValue(titleMatcher(initialTitle))
 
   // Type into the markdown editor surface (Tiptap ProseMirror)
   const editorBody = page.locator('.ProseMirror').first()

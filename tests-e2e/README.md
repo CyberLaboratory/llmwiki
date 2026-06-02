@@ -14,11 +14,17 @@ npm run install-browsers   # one-time chromium download
 ## Run
 
 ```bash
-npm test                   # headless
+npm test                   # headless — also writes evidence/<spec>.<status>.png per test
 npm run test:headed        # watch the browser
 npm run test:ui            # Playwright UI mode
 npm run report             # open the last HTML report
+npm run upload-evidence    # publish evidence/ PNGs into the live wiki
 ```
+
+The `upload-evidence` step uploads every screenshot in `evidence/` to
+`/wiki/e2e-evidence/` and creates (or overwrites) a wiki note
+`e2e-evidence.md` that lists each test with its status and inlines the
+screenshot. Open the wiki to see the latest run at a glance.
 
 Point at a different instance:
 

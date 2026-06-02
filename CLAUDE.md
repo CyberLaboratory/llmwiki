@@ -28,6 +28,10 @@ This is non-negotiable:
 5. Before finishing a feature, run `cd tests-e2e && npm test` and confirm
    the new spec — plus all existing ones — pass. If a regression breaks an
    older spec, fix it in the same change.
+6. After the suite passes, run `npm run upload-evidence` to publish the
+   per-test screenshots into the live wiki under
+   `/wiki/e2e-evidence/`. The summary note `e2e-evidence.md` becomes the
+   visible record of "what's been verified end-to-end as of the last run."
 
 See [tests-e2e/README.md](tests-e2e/README.md) for setup, command reference,
 and conventions.

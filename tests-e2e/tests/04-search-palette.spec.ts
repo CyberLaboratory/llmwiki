@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { openWiki } from './helpers'
 
 test('clicking Search opens the command palette and shows results', async ({ page }) => {

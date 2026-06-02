@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { openWiki } from './helpers'
 
 test('toggling Sources switches to the files view', async ({ page }) => {
