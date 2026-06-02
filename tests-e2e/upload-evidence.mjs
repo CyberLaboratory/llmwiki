@@ -17,7 +17,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 
 const BASE_URL = process.env.LLMWIKI_BASE_URL ?? 'http://llmwiki.lan:30300'
-const KB_SLUG = process.env.LLMWIKI_KB_SLUG ?? 'container-reviews'
+const KB_SLUG = process.env.LLMWIKI_KB_SLUG ?? 'e2e-tests'
 const EVIDENCE_DIR = resolve(process.cwd(), 'evidence')
 const PNG_PATH = '/wiki/e2e-evidence/'
 const NOTE_PATH = '/wiki/'

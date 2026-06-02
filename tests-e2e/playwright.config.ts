@@ -4,6 +4,7 @@ const BASE_URL = process.env.LLMWIKI_BASE_URL ?? 'http://llmwiki.lan:30300'
 
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './global-setup.ts',
   timeout: 30_000,
   expect: { timeout: 8_000 },
   fullyParallel: false,

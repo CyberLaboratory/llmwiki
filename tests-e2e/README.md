@@ -3,6 +3,11 @@
 Playwright suite that runs against a **live llmwiki instance** (default
 `http://llmwiki.lan:30300`). One spec per major feature.
 
+The suite targets a **dedicated sandbox wiki** (default slug `e2e-tests`)
+so production wikis stay clean. The `global-setup.ts` hook creates the
+sandbox KB on first run and seeds three cross-linked notes so all specs
+have content to work with.
+
 ## Setup
 
 ```bash
@@ -26,11 +31,12 @@ The `upload-evidence` step uploads every screenshot in `evidence/` to
 `e2e-evidence.md` that lists each test with its status and inlines the
 screenshot. Open the wiki to see the latest run at a glance.
 
-Point at a different instance:
+Point at a different instance or sandbox wiki:
 
 ```bash
 LLMWIKI_BASE_URL=http://staging.example.com npm test
-LLMWIKI_FIXTURE_SLUG=my-other-wiki npm test
+LLMWIKI_FIXTURE_SLUG=my-other-wiki npm test       # tests
+LLMWIKI_KB_SLUG=my-other-wiki npm run upload-evidence  # upload target
 ```
 
 ## Conventions

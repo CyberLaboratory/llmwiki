@@ -5,7 +5,9 @@
 Default deployment: **http://llmwiki.lan:30300** (LAN, unauthenticated).
 Override with `LLMWIKI_BASE_URL` when targeting staging or another box.
 
-Canonical fixture wiki slug: `container-reviews`. Tests assume it exists.
+Sandbox wiki slug for e2e tests: `e2e-tests`. Created and seeded
+automatically by `tests-e2e/global-setup.ts` — never mutate production
+wikis (e.g. `container-reviews`) from a test run.
 
 ## End-to-end test policy
 

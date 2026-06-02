@@ -1,7 +1,10 @@
 import type { Page, Locator } from '@playwright/test'
 
-/** Existing wiki used as the canonical fixture. Must exist on the live instance. */
-export const FIXTURE_WIKI_SLUG = process.env.LLMWIKI_FIXTURE_SLUG ?? 'container-reviews'
+/** Dedicated sandbox wiki for e2e runs. The global setup hook (see
+ *  playwright.config.ts globalSetup) creates this KB and seeds a
+ *  bootstrap wiki note if either is missing — so the suite never
+ *  pollutes the production "container-reviews" wiki. */
+export const FIXTURE_WIKI_SLUG = process.env.LLMWIKI_FIXTURE_SLUG ?? 'e2e-tests'
 
 /** Prefix for any note this suite creates. Use to spot/clean up test data. */
 export const E2E_PREFIX = 'e2e-'
