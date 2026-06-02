@@ -623,6 +623,17 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
     return handleMoveDocument(doc.id, targetPath)
   }
 
+  const handleDeleteWikiNote = async (wikiPath: string) => {
+    const doc = wikiDocs.find((d) => (d.path + d.filename).replace(/^\/wiki\/?/, '') === wikiPath)
+    if (!doc) return
+    await handleDeleteDocument(doc.id)
+    if (wikiActivePath === wikiPath) {
+      setWikiActivePath(null)
+      lastWikiDocNumberRef.current = null
+      updateParam('p', null)
+    }
+  }
+
   const handleRenameDocument = async (docId: string, newTitle: string) => {
     const t = getToken()
     if (!t) return
@@ -836,6 +847,7 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
             onCreateWikiNote={handleCreateWikiNote}
             onRenameWikiNote={handleRenameWikiNote}
             onMoveWikiNote={handleMoveWikiNote}
+            onDeleteWikiNote={handleDeleteWikiNote}
             wikiSubfolders={wikiSubfolders}
           />
         </div>

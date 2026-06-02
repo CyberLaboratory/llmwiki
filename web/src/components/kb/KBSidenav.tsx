@@ -7,7 +7,7 @@ import {
   ChevronRight, FileText, NotepadText, Library,
   Upload, BookOpen, ArrowUpRight, Search as SearchIcon,
   Lightbulb, Box, ScrollText, Network, Folder,
-  Plus, Pencil, FolderInput, LayoutGrid,
+  Plus, Pencil, FolderInput, LayoutGrid, Trash2,
 } from 'lucide-react'
 import {
   CommandDialog, CommandInput, CommandList, CommandItem,
@@ -50,6 +50,7 @@ interface KBSidenavProps {
   onCreateWikiNote: (title: string, folder: string) => void
   onRenameWikiNote: (path: string, newTitle: string) => void
   onMoveWikiNote: (path: string, newFolder: string) => void
+  onDeleteWikiNote: (path: string) => Promise<void> | void
   wikiSubfolders: string[]
 }
 
@@ -71,6 +72,7 @@ export function KBSidenav({
   onCreateWikiNote,
   onRenameWikiNote,
   onMoveWikiNote,
+  onDeleteWikiNote,
   wikiSubfolders,
 }: KBSidenavProps) {
   const [searchOpen, setSearchOpen] = React.useState(false)
@@ -87,6 +89,10 @@ export function KBSidenav({
   // Move dialog state
   const [moveState, setMoveState] = React.useState<{ path: string } | null>(null)
   const [moveFolder, setMoveFolder] = React.useState('')
+
+  // Delete dialog state
+  const [deleteState, setDeleteState] = React.useState<{ path: string; title: string } | null>(null)
+  const [deleting, setDeleting] = React.useState(false)
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -158,6 +164,17 @@ export function KBSidenav({
     onMoveWikiNote(moveState.path, moveFolder.trim())
     setMoveState(null)
     setMoveFolder('')
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteState || deleting) return
+    setDeleting(true)
+    try {
+      await onDeleteWikiNote(deleteState.path)
+      setDeleteState(null)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -315,6 +332,7 @@ export function KBSidenav({
                 onNavigate={onWikiNavigate}
                 onRenameRequest={(path, title) => { setRenameState({ path, title }); setRenameValue(title) }}
                 onMoveRequest={(path) => { setMoveState({ path }); setMoveFolder('') }}
+                onDeleteRequest={(path, title) => setDeleteState({ path, title })}
               />
             ))}
           </div>
@@ -440,6 +458,35 @@ export function KBSidenav({
         </DialogContent>
       </Dialog>
 
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteState} onOpenChange={(v) => { if (!v && !deleting) setDeleteState(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete note</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-medium text-foreground">{deleteState?.title}</span>? This cannot be undone.
+          </p>
+          <DialogFooter>
+            <button
+              onClick={() => setDeleteState(null)}
+              disabled={deleting}
+              className="rounded-lg border border-input px-4 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="wiki-node-delete-confirm"
+              onClick={handleDeleteConfirm}
+              disabled={deleting}
+              className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Move dialog */}
       <Dialog open={!!moveState} onOpenChange={(v) => { if (!v) setMoveState(null) }}>
         <DialogContent>
@@ -524,6 +571,7 @@ function WikiTreeNode({
   onNavigate,
   onRenameRequest,
   onMoveRequest,
+  onDeleteRequest,
 }: {
   node: WikiNode
   depth: number
@@ -531,6 +579,7 @@ function WikiTreeNode({
   onNavigate: (path: string, docNumber?: number | null) => void
   onRenameRequest: (path: string, title: string) => void
   onMoveRequest: (path: string) => void
+  onDeleteRequest: (path: string, title: string) => void
 }) {
   const hasChildren = node.children && node.children.length > 0
   const isActive = node.path != null && node.path === activePath
@@ -589,6 +638,14 @@ function WikiTreeNode({
             <FolderInput className="size-3.5 mr-2 opacity-60" />
             Move
           </ContextMenuItem>
+          <ContextMenuItem
+            data-testid="wiki-node-delete-menuitem"
+            onClick={() => onDeleteRequest(node.path!, node.title)}
+            className="text-destructive focus:text-destructive"
+          >
+            <Trash2 className="size-3.5 mr-2 opacity-60" />
+            Delete
+          </ContextMenuItem>
         </ContextMenuContent>
       )}
     </ContextMenu>
@@ -610,6 +667,7 @@ function WikiTreeNode({
               onNavigate={onNavigate}
               onRenameRequest={onRenameRequest}
               onMoveRequest={onMoveRequest}
+              onDeleteRequest={onDeleteRequest}
             />
           ))}
         </motion.div>
