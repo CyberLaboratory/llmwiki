@@ -8,7 +8,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import type { Components } from 'react-markdown'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { FileText, Copy, Download, Check, Network, Link2, ChevronRight } from 'lucide-react'
+import { FileText, Copy, Download, Check, Network, Link2, ChevronRight, Pencil } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api'
 import { useUserStore } from '@/stores'
@@ -438,12 +438,13 @@ interface WikiContentProps {
   onNavigate: (path: string) => void
   onSourceClick?: (filename: string, page?: number) => void
   onGraphClick?: () => void
+  onEdit?: () => void
   documents?: DocumentListItem[]
   activeDocId?: string | null
   kbId?: string
 }
 
-export function WikiContent({ content, title, onNavigate, onSourceClick, onGraphClick, documents, activeDocId, kbId }: WikiContentProps) {
+export function WikiContent({ content, title, onNavigate, onSourceClick, onGraphClick, onEdit, documents, activeDocId, kbId }: WikiContentProps) {
   const processedContent = React.useMemo(() => stripLeadingH1(content, title), [content, title])
   const tocItems = React.useMemo(() => extractTocFromMarkdown(processedContent), [processedContent])
   const footnoteSources = React.useMemo(() => parseFootnoteSources(processedContent), [processedContent])
@@ -813,6 +814,15 @@ export function WikiContent({ content, title, onNavigate, onSourceClick, onGraph
                       title="Show in graph"
                     >
                       <Network className="size-3.5" />
+                    </button>
+                  )}
+                  {onEdit && (
+                    <button
+                      onClick={onEdit}
+                      className="p-1.5 rounded-md text-muted-foreground/40 hover:text-muted-foreground hover:bg-accent transition-colors cursor-pointer"
+                      title="Edit note"
+                    >
+                      <Pencil className="size-3.5" />
                     </button>
                   )}
                 </div>

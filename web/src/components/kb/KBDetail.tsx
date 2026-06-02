@@ -14,6 +14,7 @@ import { FilesGrid } from '@/components/kb/FilesGrid'
 import { GraphViewer } from '@/components/kb/GraphViewer'
 import { SelectionActionBar } from '@/components/kb/SelectionActionBar'
 import { WikiContent } from '@/components/wiki/WikiContent'
+import { NoteEditor } from '@/components/editor/NoteEditor'
 import type { DocumentListItem, WikiNode } from '@/lib/types'
 import type { ViewMode } from '@/app/(dashboard)/wikis/[slug]/[[...path]]/page'
 
@@ -270,6 +271,10 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
   const [pageTitle, setPageTitle] = React.useState('')
   const [pageLoading, setPageLoading] = React.useState(false)
   const [pageLoadedPath, setPageLoadedPath] = React.useState<string | null>(null)
+  const [wikiEditing, setWikiEditing] = React.useState(false)
+
+  // Exit edit mode when switching pages
+  React.useEffect(() => { setWikiEditing(false) }, [wikiActivePath])
 
   const activeWikiDoc = React.useMemo(() => {
     if (!wikiActivePath) return null
@@ -902,23 +907,37 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
               </motion.div>
             ) : hasNavigableWiki && wikiActivePath ? (
               <motion.div
-                key={`wiki-${wikiActivePath}`}
+                key={`wiki-${wikiActivePath}-${wikiEditing ? 'edit' : 'view'}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
                 className="h-full"
               >
-                <WikiContent
-                  content={pageContent}
-                  title={pageTitle}
-                  onNavigate={handleWikiNavigate}
-                  onSourceClick={handleCitationSourceClick}
-                  onGraphClick={handlePageGraphClick}
-                  documents={documents}
-                  activeDocId={activeWikiDocId}
-                  kbId={kbId}
-                />
+                {wikiEditing && activeWikiDoc ? (
+                  <NoteEditor
+                    key={activeWikiDoc.id}
+                    documentId={activeWikiDoc.id}
+                    initialTitle={activeWikiDoc.title ?? activeWikiDoc.filename}
+                    initialTags={activeWikiDoc.tags ?? []}
+                    initialDate={activeWikiDoc.date}
+                    initialProperties={activeWikiDoc.metadata?.properties as Record<string, unknown> | undefined}
+                    backLabel="Back to page"
+                    onBack={() => setWikiEditing(false)}
+                  />
+                ) : (
+                  <WikiContent
+                    content={pageContent}
+                    title={pageTitle}
+                    onNavigate={handleWikiNavigate}
+                    onSourceClick={handleCitationSourceClick}
+                    onGraphClick={handlePageGraphClick}
+                    onEdit={activeWikiDoc ? () => setWikiEditing(true) : undefined}
+                    documents={documents}
+                    activeDocId={activeWikiDocId}
+                    kbId={kbId}
+                  />
+                )}
               </motion.div>
             ) : (
               <motion.div
