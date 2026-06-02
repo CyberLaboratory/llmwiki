@@ -188,6 +188,8 @@ async def _local_lifespan(app: FastAPI):
 
 app = FastAPI(title="LLM Wiki API", lifespan=lifespan)
 
+# No TrustedHostMiddleware: the API accepts any Host header so in-cluster
+# callers can reach it via Service DNS (llmwiki-api, *.svc.cluster.local, Pod IP).
 _cors_origins = ["*"] if settings.MODE == "local" else [settings.APP_URL]
 app.add_middleware(
     CORSMiddleware,

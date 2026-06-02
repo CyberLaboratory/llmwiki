@@ -71,10 +71,15 @@ def _default_allowed_hosts() -> list[str]:
 
 
 def _transport_security_settings() -> TransportSecuritySettings:
-    allowed_hosts = (
-        _allowed_host_values(os.environ.get("MCP_ALLOWED_HOSTS", ""))
-        or _default_allowed_hosts()
-    )
+    # Local mode has no auth and is documented as trusted-network only. Default
+    # to permissive so in-cluster callers reaching the Service by any DNS name
+    # (short, namespaced, FQDN, Pod IP) are accepted without per-deploy tuning.
+    # Setting MCP_ALLOWED_HOSTS re-enables strict DNS rebinding protection.
+    raw_hosts = os.environ.get("MCP_ALLOWED_HOSTS", "")
+    if not raw_hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    allowed_hosts = _allowed_host_values(raw_hosts) or _default_allowed_hosts()
     allowed_origins = _csv_values(os.environ.get("MCP_ALLOWED_ORIGINS", ""))
     if not allowed_origins:
         allowed_origins = [f"http://{host}" for host in allowed_hosts]
@@ -134,6 +139,8 @@ mcp = FastMCP(
     instructions=(
         "You are connected to a local LLM Wiki workspace. The user has uploaded files, "
         "notes, and documents that you can read, search, edit, and organize. "
+        "When creating notes about specific projects (e.g., llmwiki codebase), organize them under "
+        "a project-specific path like /wiki/llmwiki/ to keep documentation organized and self-contained. "
         "Call the `guide` tool first to see available knowledge bases and learn the full workflow."
     ),
     transport_security=_transport_security_settings(),

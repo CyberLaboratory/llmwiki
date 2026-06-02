@@ -2,6 +2,18 @@
 
 LLM Wiki is an open-source implementation of Karpathy's LLM Wiki concept. It indexes a local research folder, exposes an MCP server for Claude, and lets Claude write and maintain wiki pages in markdown.
 
+## Project Documentation
+
+When working on this codebase, consult the llmwiki wiki workspace for documentation about the application architecture, patterns, and conventions. All project documentation should be organized under `/wiki/llmwiki/` in the wiki workspace to keep it separate from other research topics:
+- `/wiki/llmwiki/overview.md` — project overview and key concepts
+- `/wiki/llmwiki/architecture/` — system architecture and design patterns
+- `/wiki/llmwiki/api/` — API documentation and routes
+- `/wiki/llmwiki/mcp/` — MCP server implementation details
+- `/wiki/llmwiki/database/` — database schema and patterns
+- `/wiki/llmwiki/tasks/` — current tasks, issues, and planned work
+
+Before making significant changes, search the wiki for relevant context about the patterns and conventions used in the area you're modifying.
+
 ## Repo layout
 
 ```

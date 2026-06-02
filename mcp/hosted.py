@@ -39,8 +39,10 @@ mcp = FastMCP(
         "You are connected to an LLM Wiki workspace. The user has uploaded files, notes, "
         "and documents that you can read, search, edit, and organize. Your job is to work "
         "with these materials — answer questions, take notes, and compile structured wiki "
-        "pages from the raw sources. Call the `guide` tool first to see available knowledge "
-        "bases and learn the full workflow."
+        "pages from the raw sources. When creating notes about specific projects (e.g., llmwiki "
+        "codebase), organize them under a project-specific path like /wiki/llmwiki/ to keep "
+        "documentation organized and self-contained. Call the `guide` tool first to see available "
+        "knowledge bases and learn the full workflow."
     ),
     token_verifier=SupabaseTokenVerifier(),
     auth=AuthSettings(

@@ -68,6 +68,20 @@ You can create pages outside of concepts/ and entities/ when needed:
 
 But concepts/ and entities/ are the primary categories. When in doubt, file there.
 
+### Project-Specific Organization
+When documenting a specific project or codebase (like "llmwiki", "myapp", etc.), organize ALL notes under a project-specific path:
+- `/wiki/llmwiki/` — all notes about the llmwiki project/codebase
+- `/wiki/myproject/` — all notes about myproject
+
+Within the project folder, use the same structure:
+- `/wiki/llmwiki/overview.md` — project overview
+- `/wiki/llmwiki/architecture/` — architecture docs
+- `/wiki/llmwiki/api/` — API documentation
+- `/wiki/llmwiki/concepts/` — project-specific concepts
+- `/wiki/llmwiki/tasks/` — tasks, issues, plans
+
+This keeps project documentation self-contained and prevents mixing different projects.
+
 ## Page Hierarchy
 
 Wiki pages use a parent/child hierarchy via paths:

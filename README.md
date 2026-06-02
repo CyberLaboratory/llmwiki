@@ -224,7 +224,16 @@ spec:
       targetPort: 8080
 ```
 
-The health check is `GET /health`. The MCP streamable HTTP endpoint is served by the MCP library at `/mcp`, so in-cluster clients can use `http://llmwiki-mcp:8080/mcp`. `MCP_URL` must match the hostname clients use, or set `MCP_ALLOWED_HOSTS` to a comma-separated allow-list such as `llmwiki-mcp:*,192.168.2.43:*`. Otherwise the MCP transport rejects requests with `421 Misdirected Request` as DNS rebinding protection. No auth is enabled in `MODE=local`; keep this Service on a trusted network or access it through `kubectl port-forward`.
+The health check is `GET /health`. The MCP streamable HTTP endpoint is served by the MCP library at `/mcp`, so in-cluster clients can reach it via any Service DNS form — `http://llmwiki-mcp:8080/mcp`, `http://llmwiki-mcp.<namespace>.svc.cluster.local:8080/mcp`, or a Pod IP. In `MODE=local` DNS rebinding protection is **off by default** so any Host header is accepted; this matches the "no auth, trusted network only" posture. To re-enable strict Host validation set `MCP_ALLOWED_HOSTS` to a comma-separated allow-list such as `llmwiki-mcp:*,llmwiki-mcp.default.svc.cluster.local:*,192.168.2.43:*` — anything outside the list then gets `421 Misdirected Request`. Keep this Service on a trusted network or access it through `kubectl port-forward`.
+
+Verify from inside the cluster:
+
+```bash
+kubectl exec -it deploy/llmwiki-mcp -- \
+  curl -sS -X POST -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+    http://llmwiki-mcp.default.svc.cluster.local:8080/mcp
+```
 
 Release deploys that update `CyberLaboratory/k8` require a repository secret named `GITOPS_PUSH_TOKEN` with read/write access to the k8 repository. The default `GITHUB_TOKEN` is scoped to this repository and cannot update that separate deployment repository.
 
