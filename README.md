@@ -226,7 +226,7 @@ spec:
 
 The health check is `GET /health`. The MCP streamable HTTP endpoint is served by the MCP library at `/mcp`, so in-cluster clients can use `http://llmwiki-mcp:8080/mcp`. `MCP_URL` must match the hostname clients use, or set `MCP_ALLOWED_HOSTS` to a comma-separated allow-list such as `llmwiki-mcp:*,192.168.2.43:*`. Otherwise the MCP transport rejects requests with `421 Misdirected Request` as DNS rebinding protection. No auth is enabled in `MODE=local`; keep this Service on a trusted network or access it through `kubectl port-forward`.
 
-Release deploys that update `CyberLaboratory/k8` require a repository secret named `K8_DEPLOY_TOKEN` with read/write access to the k8 repository. The default `GITHUB_TOKEN` is scoped to this repository and cannot update that separate deployment repository.
+Release deploys that update `CyberLaboratory/k8` require a repository secret named `GITOPS_PUSH_TOKEN` with read/write access to the k8 repository. The default `GITHUB_TOKEN` is scoped to this repository and cannot update that separate deployment repository.
 
 ## Self-hosting the multi-tenant version
 
