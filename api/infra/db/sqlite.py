@@ -136,6 +136,108 @@ async def _migrate(db: aiosqlite.Connection) -> None:
         await db.execute("PRAGMA user_version = 3")
         await db.commit()
 
+    if version < 4:
+        await _fix_broken_document_fks(db)
+        await db.execute("PRAGMA user_version = 4")
+        await db.commit()
+
+
+async def _dependent_tables_reference_documents_old(db: aiosqlite.Connection) -> bool:
+    """Return True if any dependent table still has its FK rewritten to 'documents_old'."""
+    for tbl in ("document_chunks", "document_pages", "document_references"):
+        cursor = await db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row and row[0] and "documents_old" in row[0]:
+            return True
+    return False
+
+
+async def _fix_broken_document_fks(db: aiosqlite.Connection) -> None:
+    """Fix document_chunks/pages/references whose FKs were rewritten to 'documents_old'
+    by a previous migration that used ALTER TABLE documents RENAME TO documents_old."""
+    if not await _dependent_tables_reference_documents_old(db):
+        return
+
+    logger.info("Fixing broken FK references to documents_old in dependent tables")
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        # document_chunks: rebuild preserving data, then recreate FTS triggers
+        await db.execute(
+            "CREATE TABLE document_chunks_new ("
+            "id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), "
+            "document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, "
+            "chunk_index INTEGER NOT NULL, "
+            "content TEXT NOT NULL, "
+            "page INTEGER, "
+            "start_char INTEGER, "
+            "token_count INTEGER NOT NULL, "
+            "header_breadcrumb TEXT, "
+            "created_at TEXT DEFAULT (datetime('now')), "
+            "UNIQUE(document_id, chunk_index))"
+        )
+        await db.execute("INSERT INTO document_chunks_new SELECT * FROM document_chunks")
+        await db.execute("DROP TABLE document_chunks")
+        await db.execute("ALTER TABLE document_chunks_new RENAME TO document_chunks")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON document_chunks(document_id)")
+        # Recreate FTS triggers dropped along with the old document_chunks table
+        await db.execute(
+            "CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON document_chunks BEGIN\n"
+            "    INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);\n"
+            "END"
+        )
+        await db.execute(
+            "CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON document_chunks BEGIN\n"
+            "    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES('delete', old.rowid, old.content);\n"
+            "END"
+        )
+        await db.execute(
+            "CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON document_chunks BEGIN\n"
+            "    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES('delete', old.rowid, old.content);\n"
+            "    INSERT INTO chunks_fts(rowid, content) VALUES (new.rowid, new.content);\n"
+            "END"
+        )
+
+        # document_pages
+        await db.execute(
+            "CREATE TABLE document_pages_new ("
+            "id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), "
+            "document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, "
+            "page INTEGER NOT NULL, "
+            "content TEXT NOT NULL, "
+            "elements TEXT, "
+            "UNIQUE(document_id, page))"
+        )
+        await db.execute("INSERT INTO document_pages_new SELECT * FROM document_pages")
+        await db.execute("DROP TABLE document_pages")
+        await db.execute("ALTER TABLE document_pages_new RENAME TO document_pages")
+
+        # document_references
+        await db.execute(
+            "CREATE TABLE document_references_new ("
+            "id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), "
+            "source_document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, "
+            "target_document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, "
+            "reference_type TEXT NOT NULL CHECK (reference_type IN ('cites', 'links_to')), "
+            "page INTEGER, "
+            "UNIQUE(source_document_id, target_document_id, reference_type))"
+        )
+        await db.execute("INSERT INTO document_references_new SELECT * FROM document_references")
+        await db.execute("DROP TABLE document_references")
+        await db.execute("ALTER TABLE document_references_new RENAME TO document_references")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_refs_source ON document_references(source_document_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_refs_target ON document_references(target_document_id)")
+
+        await db.commit()
+        logger.info("Fixed FK references in document_chunks, document_pages, document_references")
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.execute("PRAGMA foreign_keys=ON")
+
 
 async def _documents_have_global_relative_unique(db: aiosqlite.Connection) -> bool:
     cursor = await db.execute("PRAGMA index_list(documents)")
@@ -165,9 +267,13 @@ async def _rebuild_documents_table(db: aiosqlite.Connection, fallback_workspace_
     await db.commit()
     await db.execute("PRAGMA foreign_keys=OFF")
     try:
-        await db.execute("ALTER TABLE documents RENAME TO documents_old")
+        # Use create-new / copy / drop-old / rename pattern to avoid SQLite auto-rewriting
+        # FK references in dependent tables (document_chunks, document_pages, document_references)
+        # when renaming 'documents'. Those tables reference 'documents' by name; if we renamed
+        # 'documents' to 'documents_old' first, SQLite would rewrite their FKs to 'documents_old'
+        # and then DROP TABLE documents_old leaves them with a dangling reference.
         await db.execute(
-            "CREATE TABLE documents ("
+            "CREATE TABLE documents_new ("
             "id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), "
             "workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE, "
             "user_id TEXT NOT NULL, filename TEXT NOT NULL, title TEXT, "
@@ -182,10 +288,11 @@ async def _rebuild_documents_table(db: aiosqlite.Connection, fallback_workspace_
             "UNIQUE(workspace_id, relative_path))"
         )
         await db.execute(
-            f"INSERT INTO documents ({columns}) SELECT {select_columns} FROM documents_old",
+            f"INSERT INTO documents_new ({columns}) SELECT {select_columns} FROM documents",
             (fallback_workspace_id,),
         )
-        await db.execute("DROP TABLE documents_old")
+        await db.execute("DROP TABLE documents")
+        await db.execute("ALTER TABLE documents_new RENAME TO documents")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_workspace_id ON documents(workspace_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path)")
