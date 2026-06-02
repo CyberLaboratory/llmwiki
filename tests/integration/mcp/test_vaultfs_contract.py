@@ -20,7 +20,7 @@ class TestWorkspace:
 
     async def test_resolve_kb_returns_none_for_unknown(self, fs):
         instance, _ = fs
-        assert await instance.resolve_kb("nonexistent") is not None  # SQLite returns workspace regardless
+        assert await instance.resolve_kb("nonexistent") is None
 
     async def test_list_knowledge_bases(self, fs):
         instance, _ = fs
