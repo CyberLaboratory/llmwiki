@@ -57,7 +57,7 @@ intersphinx_mapping = {
 }
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "apidocs/api/api.__pycache__*"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
 
 # HTML output — Furo: clean, dark-mode-friendly, well-suited for API docs.
 html_theme = "furo"

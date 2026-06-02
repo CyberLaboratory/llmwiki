@@ -23,8 +23,11 @@ apidocs/index
 
 Two machine-readable views of this site are published alongside the HTML:
 
-- [`llms.txt`](llms.txt) — index of every page with a short summary.
-- [`llms-full.txt`](llms-full.txt) — the entire docs corpus as one
+<!-- These files are emitted by sphinx-llms-txt at build time and live
+     at the site root; MyST can't resolve them as cross-references, so
+     we link via raw HTML. -->
+- <a href="llms.txt"><code>llms.txt</code></a> — index of every page with a short summary.
+- <a href="llms-full.txt"><code>llms-full.txt</code></a> — the entire docs corpus as one
   plain-text document, suitable for dropping into a context window.
 
 Both follow the [llms.txt convention](https://llmstxt.org/).
