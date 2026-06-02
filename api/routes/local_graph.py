@@ -15,7 +15,7 @@ async def get_kb_graph(
     request: Request = None,
 ):
     db = request.app.state.sqlite_db
-    return await get_graph_local(db, user_id)
+    return await get_graph_local(db, user_id, kb_id)
 
 
 @router.post("/v1/knowledge-bases/{kb_id}/graph/rebuild")
@@ -25,4 +25,4 @@ async def rebuild_references(
     request: Request = None,
 ):
     db = request.app.state.sqlite_db
-    return await rebuild_local(db, user_id)
+    return await rebuild_local(db, user_id, kb_id)

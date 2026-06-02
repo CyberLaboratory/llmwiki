@@ -8,6 +8,7 @@ from services.graph import get_graph_local, rebuild_local
 
 
 USER_ID = "local-user"
+KB_ID = "workspace-1"
 
 
 async def _make_db():
@@ -17,6 +18,7 @@ async def _make_db():
         """
         CREATE TABLE documents (
             id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
             filename TEXT NOT NULL,
             title TEXT,
@@ -47,11 +49,12 @@ async def test_get_graph_local_maps_sqlite_rows_and_filters_failed_docs():
     try:
         await db.executemany(
             "INSERT INTO documents "
-            "(id, user_id, filename, title, path, file_type, source_kind, metadata, tags, status, content) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, workspace_id, user_id, filename, title, path, file_type, source_kind, metadata, tags, status, content) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     "wiki-overview",
+                    KB_ID,
                     USER_ID,
                     "overview.md",
                     "Overview",
@@ -65,6 +68,7 @@ async def test_get_graph_local_maps_sqlite_rows_and_filters_failed_docs():
                 ),
                 (
                     "source-report",
+                    KB_ID,
                     USER_ID,
                     "source.pdf",
                     "Source",
@@ -78,6 +82,7 @@ async def test_get_graph_local_maps_sqlite_rows_and_filters_failed_docs():
                 ),
                 (
                     "failed-doc",
+                    KB_ID,
                     USER_ID,
                     "failed.pdf",
                     "Failed",
@@ -102,7 +107,7 @@ async def test_get_graph_local_maps_sqlite_rows_and_filters_failed_docs():
         )
         await db.commit()
 
-        data = await get_graph_local(db, USER_ID)
+        data = await get_graph_local(db, USER_ID, KB_ID)
 
         nodes = {node["id"]: node for node in data["nodes"]}
         assert set(nodes) == {"wiki-overview", "source-report"}
@@ -121,11 +126,12 @@ async def test_rebuild_local_maps_sqlite_rows_and_indexes_references():
         content = "See [Tool](entities/tool.md).\n\n[^1]: source.pdf, p.7"
         await db.executemany(
             "INSERT INTO documents "
-            "(id, user_id, filename, title, path, file_type, source_kind, metadata, tags, status, content) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, workspace_id, user_id, filename, title, path, file_type, source_kind, metadata, tags, status, content) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     "wiki-overview",
+                    KB_ID,
                     USER_ID,
                     "overview.md",
                     "Overview",
@@ -139,6 +145,7 @@ async def test_rebuild_local_maps_sqlite_rows_and_indexes_references():
                 ),
                 (
                     "wiki-tool",
+                    KB_ID,
                     USER_ID,
                     "tool.md",
                     "Tool",
@@ -152,6 +159,7 @@ async def test_rebuild_local_maps_sqlite_rows_and_indexes_references():
                 ),
                 (
                     "source-report",
+                    KB_ID,
                     USER_ID,
                     "source.pdf",
                     "Source",
@@ -172,7 +180,7 @@ async def test_rebuild_local_maps_sqlite_rows_and_indexes_references():
         )
         await db.commit()
 
-        result = await rebuild_local(db, USER_ID)
+        result = await rebuild_local(db, USER_ID, KB_ID)
 
         assert result == {"citations": 1, "links": 1}
         cursor = await db.execute(
@@ -186,6 +194,7 @@ async def test_rebuild_local_maps_sqlite_rows_and_indexes_references():
 
         assert rows == [
             ("wiki-overview", "source-report", "cites", 7),
+            ("old-source", "old-target", "links_to", None),
             ("wiki-overview", "wiki-tool", "links_to", None),
         ]
     finally:

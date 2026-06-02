@@ -32,6 +32,7 @@ def _safe_resolve(relative: str) -> Path:
 async def upload_file(
     file: UploadFile = File(...),
     path: str = Form(default="/"),
+    knowledge_base_id: str | None = Form(default=None),
     user_id: str = Depends(get_user_id),
     request: Request = None,
 ):
@@ -75,19 +76,29 @@ async def upload_file(
     chunk_repo = SQLiteChunkRepository(db)
 
     doc_id = str(uuid.uuid4())
+    kb_id = knowledge_base_id
+    if not kb_id:
+        ws_row = await db.execute("SELECT id FROM workspace ORDER BY created_at LIMIT 1")
+        ws = await ws_row.fetchone()
+        kb_id = ws[0] if ws else None
+    if not kb_id:
+        raise HTTPException(status_code=400, detail="No workspace exists")
 
     # Auto-assign document_number
-    cursor = await db.execute("SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents")
+    cursor = await db.execute(
+        "SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents WHERE workspace_id = ?",
+        (kb_id,),
+    )
     row = await cursor.fetchone()
     doc_number = row[0]
 
     import json
     await db.execute(
-        "INSERT INTO documents (id, user_id, filename, title, path, relative_path, "
+        "INSERT INTO documents (id, workspace_id, user_id, filename, title, path, relative_path, "
         "source_kind, file_type, file_size, status, content, tags, version, "
         "content_hash, mtime_ns, last_indexed_at, document_number) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 0, ?, ?, datetime('now'), ?)",
-        (doc_id, user_id, filename, title, dir_path, relative, source_kind,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 0, ?, ?, datetime('now'), ?)",
+        (doc_id, kb_id, user_id, filename, title, dir_path, relative, source_kind,
          ext or "bin", len(content_bytes),
          "ready" if text_content is not None else "pending",
          text_content, content_hash,
@@ -98,9 +109,6 @@ async def upload_file(
     # Chunk text content or kick off processing for non-text files
     if text_content:
         from services.chunker import chunk_text
-        ws_row = await db.execute("SELECT id FROM workspace LIMIT 1")
-        ws = await ws_row.fetchone()
-        kb_id = ws[0] if ws else ""
         chunks = chunk_text(text_content)
         await chunk_repo.store(doc_id, user_id, kb_id, chunks)
     elif needs_processing:

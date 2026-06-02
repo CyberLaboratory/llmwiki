@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS workspace (
 
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL,
     filename TEXT NOT NULL,
     title TEXT,
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS documents (
     stale_since TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(relative_path)
+    UNIQUE(workspace_id, relative_path)
 );
 
 CREATE TABLE IF NOT EXISTS document_pages (
@@ -96,6 +97,7 @@ CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON document_chunks B
 END;
 
 CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path);
+CREATE INDEX IF NOT EXISTS idx_documents_workspace_id ON documents(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path);
 CREATE INDEX IF NOT EXISTS idx_documents_source_kind ON documents(source_kind);
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);

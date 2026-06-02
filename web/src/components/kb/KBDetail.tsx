@@ -692,6 +692,7 @@ export function KBDetail({ kbId, kbSlug, kbName, viewMode, routeFilesPath }: Pro
             const formData = new FormData()
             formData.append('file', file)
             formData.append('path', targetPath)
+            formData.append('knowledge_base_id', kbId)
             try {
               const res = await fetch(`${API_URL}/v1/upload`, { method: 'POST', body: formData })
               if (!res.ok) throw new Error(`Upload failed: ${res.status}`)

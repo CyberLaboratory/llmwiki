@@ -153,9 +153,16 @@ async def _index_file(db: aiosqlite.Connection, workspace: Path, file_path: Path
             pass
 
     # Check if document already exists at this path
+    cursor = await db.execute("SELECT id FROM workspace ORDER BY created_at LIMIT 1")
+    workspace_row = await cursor.fetchone()
+    if not workspace_row:
+        logger.warning("Skipping index for %s: no workspace row exists", relative)
+        return
+    kb_id = workspace_row[0]
+
     cursor = await db.execute(
-        "SELECT id, content_hash FROM documents WHERE relative_path = ?",
-        (relative,),
+        "SELECT id, content_hash FROM documents WHERE workspace_id = ? AND relative_path = ?",
+        (kb_id, relative),
     )
     existing = await cursor.fetchone()
 
@@ -183,19 +190,20 @@ async def _index_file(db: aiosqlite.Connection, workspace: Path, file_path: Path
         # Create new
         doc_id = str(uuid.uuid4())
         cursor = await db.execute(
-            "SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents",
+            "SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents WHERE workspace_id = ?",
+            (kb_id,),
         )
         row = await cursor.fetchone()
         doc_number = row[0]
 
         status = "ready" if content is not None else "pending"
         await db.execute(
-            "INSERT INTO documents (id, user_id, filename, title, path, relative_path, "
+            "INSERT INTO documents (id, workspace_id, user_id, filename, title, path, relative_path, "
             "source_kind, file_type, file_size, status, content, tags, version, "
             "content_hash, mtime_ns, last_indexed_at, document_number) "
-            "VALUES (?, (SELECT user_id FROM workspace LIMIT 1), ?, ?, ?, ?, ?, ?, ?, "
+            "VALUES (?, ?, (SELECT user_id FROM workspace ORDER BY created_at LIMIT 1), ?, ?, ?, ?, ?, ?, ?, "
             "?, ?, '[]', 0, ?, ?, datetime('now'), ?)",
-            (doc_id, filename, title, dir_path, relative, source_kind,
+            (doc_id, kb_id, filename, title, dir_path, relative, source_kind,
              ext or "bin", stat.st_size, status, content, content_hash,
              int(stat.st_mtime_ns), doc_number),
         )
@@ -216,8 +224,14 @@ async def _remove_file(db: aiosqlite.Connection, workspace: Path, file_path: Pat
     except ValueError:
         return
 
+    cursor = await db.execute("SELECT id FROM workspace ORDER BY created_at LIMIT 1")
+    workspace_row = await cursor.fetchone()
+    if not workspace_row:
+        return
+
     cursor = await db.execute(
-        "DELETE FROM documents WHERE relative_path = ?", (relative,),
+        "DELETE FROM documents WHERE workspace_id = ? AND relative_path = ?",
+        (workspace_row[0], relative),
     )
     if cursor.rowcount > 0:
         await db.commit()

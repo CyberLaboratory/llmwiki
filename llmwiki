@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LLM Wiki — local-first knowledge workspace CLI.
+"""LLM Wiki - local-first knowledge workspace CLI.
 
 Usage:
     llmwiki open <workspace>         Init if needed + serve + open browser
@@ -24,6 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 API_DIR = REPO_ROOT / "api"
 MCP_DIR = REPO_ROOT / "mcp"
 WEB_DIR = REPO_ROOT / "web"
+SQLITE_SCHEMA_PATH = REPO_ROOT / "shared" / "sqlite_schema.sql"
 
 
 def _sanitize_name(name: str) -> str:
@@ -48,7 +49,7 @@ def cmd_init(workspace: str) -> None:
 
     # Initialize SQLite
     import sqlite3
-    schema_path = API_DIR / "infra" / "db" / "sqlite_schema.sql"
+    schema_path = SQLITE_SCHEMA_PATH
     if not schema_path.exists():
         print(f"Error: schema not found at {schema_path}", file=sys.stderr)
         sys.exit(1)
@@ -62,28 +63,28 @@ def cmd_init(workspace: str) -> None:
     ws_name = ws.name
 
     conn.execute(
-        "INSERT INTO workspace (id, name, description, user_id) VALUES (?, ?, '', ?)",
-        (ws_id, ws_name, user_id),
+        "INSERT INTO workspace (id, name, slug, description, user_id) VALUES (?, ?, ?, '', ?)",
+        (ws_id, ws_name, _sanitize_name(ws_name), user_id),
     )
 
     # Scaffold wiki pages
     doc1_id = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, "
+        "INSERT INTO documents (id, workspace_id, user_id, filename, title, path, relative_path, source_kind, "
         "file_type, status, content, tags, version, document_number) "
-        "VALUES (?, ?, 'overview.md', 'Overview', '/wiki/', 'wiki/overview.md', 'wiki', "
+        "VALUES (?, ?, ?, 'overview.md', 'Overview', '/wiki/', 'wiki/overview.md', 'wiki', "
         "'md', 'ready', ?, '[]', 0, 1)",
-        (doc1_id, user_id,
+        (doc1_id, ws_id, user_id,
          f"This wiki tracks research on {ws_name}.\n\n## Key Findings\n\nNo sources ingested yet.\n\n## Recent Updates\n\nNo activity yet."),
     )
 
     doc2_id = str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, "
+        "INSERT INTO documents (id, workspace_id, user_id, filename, title, path, relative_path, source_kind, "
         "file_type, status, content, tags, version, document_number) "
-        "VALUES (?, ?, 'log.md', 'Log', '/wiki/', 'wiki/log.md', 'wiki', "
+        "VALUES (?, ?, ?, 'log.md', 'Log', '/wiki/', 'wiki/log.md', 'wiki', "
         "'md', 'ready', ?, '[]', 0, 2)",
-        (doc2_id, user_id, "Chronological record of ingests, queries, and maintenance passes."),
+        (doc2_id, ws_id, user_id, "Chronological record of ingests, queries, and maintenance passes."),
     )
 
     conn.commit()
@@ -105,10 +106,10 @@ def cmd_init(workspace: str) -> None:
     # Index existing files
     _index_existing_files(ws, db_path, user_id, ws_id)
 
-    print(f"✓ Initialized workspace: {ws}")
-    print(f"  wiki/overview.md — created")
-    print(f"  wiki/log.md — created")
-    print(f"  .llmwiki/index.db — created")
+    print(f"Initialized workspace: {ws}")
+    print("  wiki/overview.md - created")
+    print("  wiki/log.md - created")
+    print("  .llmwiki/index.db - created")
 
 
 def _index_existing_files(ws: Path, db_path: Path, user_id: str, ws_id: str) -> None:
@@ -169,14 +170,14 @@ def _index_existing_files(ws: Path, db_path: Path, user_id: str, ws_id: str) -> 
 
             try:
                 conn.execute(
-                    "INSERT INTO documents (id, user_id, filename, title, path, relative_path, "
+                    "INSERT INTO documents (id, workspace_id, user_id, filename, title, path, relative_path, "
                     "source_kind, file_type, file_size, status, content, tags, version, "
                     "content_hash, mtime_ns, last_indexed_at, document_number) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, '[]', 0, ?, ?, datetime('now'), "
-                    "(SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents))",
-                    (doc_id, user_id, filename, title, dir_path, relative,
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, '[]', 0, ?, ?, datetime('now'), "
+                    "(SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents WHERE workspace_id = ?))",
+                    (doc_id, ws_id, user_id, filename, title, dir_path, relative,
                      source_kind, ext or "bin", stat.st_size, content,
-                     content_hash, int(stat.st_mtime_ns)),
+                     content_hash, int(stat.st_mtime_ns), ws_id),
                 )
                 indexed += 1
             except Exception as e:
@@ -186,7 +187,7 @@ def _index_existing_files(ws: Path, db_path: Path, user_id: str, ws_id: str) -> 
     conn.close()
 
     if indexed > 0:
-        print(f"✓ Indexed {indexed} existing file(s)")
+        print(f"Indexed {indexed} existing file(s)")
 
 
 def cmd_serve(workspace: str, open_browser: bool = True) -> None:
@@ -253,6 +254,7 @@ def cmd_mcp(workspace: str) -> None:
     if not (ws / ".llmwiki" / "index.db").exists():
         cmd_init(str(ws))
 
+    os.chdir(str(MCP_DIR))
     os.execvp(
         sys.executable,
         [sys.executable, "-m", "local_server", "--workspace", str(ws)],
@@ -305,13 +307,13 @@ def cmd_reindex(workspace: str) -> None:
     conn.close()
 
     _index_existing_files(ws, db_path, user_id, ws_id)
-    print(f"✓ Reindexed workspace: {ws}")
+    print(f"Reindexed workspace: {ws}")
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="llmwiki",
-        description="LLM Wiki — local-first knowledge workspace",
+        description="LLM Wiki - local-first knowledge workspace",
     )
     sub = parser.add_subparsers(dest="command")
 

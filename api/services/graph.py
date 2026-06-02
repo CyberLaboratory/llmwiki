@@ -161,13 +161,13 @@ async def rebuild_hosted(conn, kb_id, user_id: str) -> dict:
 
 # ── Local (aiosqlite) ──
 
-async def get_graph_local(db, user_id: str) -> dict:
+async def get_graph_local(db, user_id: str, kb_id: str) -> dict:
     """Return {nodes, edges} for the knowledge graph viewer (SQLite)."""
     doc_rows = await _fetch_sqlite_dicts(
         db,
         "SELECT id, filename, title, path, file_type, source_kind, metadata, tags "
-        "FROM documents WHERE user_id = ? AND status != 'failed'",
-        (user_id,),
+        "FROM documents WHERE workspace_id = ? AND user_id = ? AND status != 'failed'",
+        (kb_id, user_id),
     )
 
     doc_ids = {r["id"] for r in doc_rows}
@@ -185,13 +185,13 @@ async def get_graph_local(db, user_id: str) -> dict:
     }
 
 
-async def rebuild_local(db, user_id: str) -> dict:
+async def rebuild_local(db, user_id: str, kb_id: str) -> dict:
     """Parse wiki pages and rebuild reference edges atomically (SQLite)."""
     all_docs = await _fetch_sqlite_dicts(
         db,
         "SELECT id, filename, title, path, file_type, source_kind "
-        "FROM documents WHERE user_id = ?",
-        (user_id,),
+        "FROM documents WHERE workspace_id = ? AND user_id = ?",
+        (kb_id, user_id),
     )
 
     filename_to_doc, base_to_doc, wiki_path_to_doc = build_lookup_maps(all_docs)
@@ -199,12 +199,17 @@ async def rebuild_local(db, user_id: str) -> dict:
     wiki_pages = await _fetch_sqlite_dicts(
         db,
         "SELECT id, filename, path, content FROM documents "
-        "WHERE user_id = ? AND source_kind = 'wiki' AND file_type = 'md' AND content IS NOT NULL",
-        (user_id,),
+        "WHERE workspace_id = ? AND user_id = ? AND source_kind = 'wiki' AND file_type = 'md' AND content IS NOT NULL",
+        (kb_id, user_id),
     )
 
     # Atomic: delete + inserts in a single transaction (commit only at the end)
-    await db.execute("DELETE FROM document_references")
+    if all_docs:
+        placeholders = ",".join("?" for _ in all_docs)
+        await db.execute(
+            f"DELETE FROM document_references WHERE source_document_id IN ({placeholders})",
+            [doc["id"] for doc in all_docs],
+        )
 
     total_cites = 0
     total_links = 0

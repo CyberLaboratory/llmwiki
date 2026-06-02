@@ -100,6 +100,7 @@ async def lifespan(app: FastAPI):
 
 async def _local_lifespan_inner(app: FastAPI):
     """Local mode: SQLite + local filesystem + single-user auth."""
+    import re
     import uuid
     from pathlib import Path
     from infra.db.sqlite import create_pool as create_sqlite_pool
@@ -134,9 +135,10 @@ async def _local_lifespan_inner(app: FastAPI):
     cursor = await db.execute("SELECT id FROM workspace LIMIT 1")
     if not await cursor.fetchone():
         ws_id = str(uuid.uuid4())
+        slug = re.sub(r"[\s-]+", "-", re.sub(r"[^a-z0-9\s-]", "", workspace.name.lower().strip())).strip("-") or "workspace"
         await db.execute(
-            "INSERT INTO workspace (id, name, description, user_id) VALUES (?, ?, '', ?)",
-            (ws_id, workspace.name, local_user_id),
+            "INSERT INTO workspace (id, name, slug, description, user_id) VALUES (?, ?, ?, '', ?)",
+            (ws_id, workspace.name, slug, local_user_id),
         )
         await db.commit()
         logger.info("Initialized local workspace: %s", workspace)

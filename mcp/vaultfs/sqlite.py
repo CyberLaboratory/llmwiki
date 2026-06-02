@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -53,6 +54,110 @@ def _schema_sql() -> str:
     raise RuntimeError(f"SQLite schema not found. Looked in: {searched}")
 
 
+def _slugify(name: str) -> str:
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s-]+", "-", slug).strip("-")
+    return slug or "workspace"
+
+
+async def _migrate_workspace_schema(db: aiosqlite.Connection) -> None:
+    cursor = await db.execute("PRAGMA table_info(workspace)")
+    cols = {row[1] for row in await cursor.fetchall()}
+    await cursor.close()
+    if "slug" in cols:
+        return
+
+    await db.execute("ALTER TABLE workspace ADD COLUMN slug TEXT")
+    cursor = await db.execute("SELECT id, name FROM workspace")
+    rows = await cursor.fetchall()
+    await cursor.close()
+    for row_id, name in rows:
+        await db.execute("UPDATE workspace SET slug = ? WHERE id = ?", (_slugify(name), row_id))
+    await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_slug ON workspace(slug)")
+    await db.commit()
+
+
+async def _migrate_document_workspace_schema(db: aiosqlite.Connection) -> None:
+    cursor = await db.execute("PRAGMA table_info(documents)")
+    cols = {row[1] for row in await cursor.fetchall()}
+    await cursor.close()
+
+    cursor = await db.execute("SELECT id FROM workspace ORDER BY created_at LIMIT 1")
+    workspace_row = await cursor.fetchone()
+    await cursor.close()
+    if "workspace_id" not in cols:
+        await db.execute("ALTER TABLE documents ADD COLUMN workspace_id TEXT")
+        if workspace_row:
+            await db.execute("UPDATE documents SET workspace_id = ?", (workspace_row[0],))
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_workspace_id ON documents(workspace_id)")
+        await db.commit()
+
+    if workspace_row and await _documents_have_global_relative_unique(db):
+        await _rebuild_documents_table(db, workspace_row[0])
+
+
+async def _documents_have_global_relative_unique(db: aiosqlite.Connection) -> bool:
+    cursor = await db.execute("PRAGMA index_list(documents)")
+    indexes = await cursor.fetchall()
+    await cursor.close()
+    for index in indexes:
+        if not index[2]:
+            continue
+        info = await db.execute(f"PRAGMA index_info({index[1]})")
+        cols = [row[2] for row in await info.fetchall()]
+        await info.close()
+        if cols == ["relative_path"]:
+            return True
+    return False
+
+
+async def _rebuild_documents_table(db: aiosqlite.Connection, fallback_workspace_id: str) -> None:
+    columns = (
+        "id, workspace_id, user_id, filename, title, path, relative_path, source_kind, "
+        "file_type, file_size, document_number, status, page_count, content, tags, date, "
+        "metadata, error_message, version, parser, content_hash, mtime_ns, last_indexed_at, "
+        "stale_since, created_at, updated_at"
+    )
+    select_columns = columns.replace("workspace_id", "COALESCE(workspace_id, ?) AS workspace_id", 1)
+
+    await db.commit()
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await db.execute("ALTER TABLE documents RENAME TO documents_old")
+        await db.execute(
+            "CREATE TABLE documents ("
+            "id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), "
+            "workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE, "
+            "user_id TEXT NOT NULL, filename TEXT NOT NULL, title TEXT, "
+            "path TEXT DEFAULT '/' NOT NULL, relative_path TEXT NOT NULL, "
+            "source_kind TEXT NOT NULL CHECK (source_kind IN ('wiki', 'source', 'asset')), "
+            "file_type TEXT NOT NULL, file_size INTEGER DEFAULT 0, document_number INTEGER, "
+            "status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'ready', 'failed')), "
+            "page_count INTEGER, content TEXT, tags TEXT DEFAULT '[]', date TEXT, metadata TEXT, "
+            "error_message TEXT, version INTEGER DEFAULT 0, parser TEXT, content_hash TEXT, "
+            "mtime_ns INTEGER, last_indexed_at TEXT, stale_since TEXT, "
+            "created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), "
+            "UNIQUE(workspace_id, relative_path))"
+        )
+        await db.execute(
+            f"INSERT INTO documents ({columns}) SELECT {select_columns} FROM documents_old",
+            (fallback_workspace_id,),
+        )
+        await db.execute("DROP TABLE documents_old")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_workspace_id ON documents(workspace_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_source_kind ON documents(source_kind)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.execute("PRAGMA foreign_keys=ON")
+
+
 class SqliteVaultFS(VaultFS):
     """SQLite + local filesystem vault."""
 
@@ -65,7 +170,11 @@ class SqliteVaultFS(VaultFS):
         """Initialize the SQLite connection and workspace root for the given path."""
         global _db, _workspace_root, _write_lock, _write_owner, _write_depth
         _workspace_root = Path(workspace_path).resolve()
-        db_path = os.path.join(workspace_path, ".llmwiki", "index.db")
+        _workspace_root.mkdir(parents=True, exist_ok=True)
+        (_workspace_root / "wiki").mkdir(parents=True, exist_ok=True)
+        (_workspace_root / ".llmwiki").mkdir(parents=True, exist_ok=True)
+        (_workspace_root / ".llmwiki" / "cache").mkdir(parents=True, exist_ok=True)
+        db_path = str(_workspace_root / ".llmwiki" / "index.db")
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         _db = await aiosqlite.connect(db_path, timeout=30)
         _write_lock = asyncio.Lock()
@@ -75,6 +184,8 @@ class SqliteVaultFS(VaultFS):
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
         await _db.executescript(_schema_sql())
+        await _migrate_workspace_schema(_db)
+        await _migrate_document_workspace_schema(_db)
         await _db.commit()
         logger.info("SQLite initialized: %s", db_path)
 
@@ -130,21 +241,29 @@ class SqliteVaultFS(VaultFS):
 
     async def resolve_kb(self, slug: str) -> dict | None:
         db = self._db_or_raise()
-        cursor = await db.execute("SELECT id, name, user_id FROM workspace LIMIT 1")
+        if not slug:
+            cursor = await db.execute(
+                "SELECT id, name, slug, user_id FROM workspace ORDER BY created_at LIMIT 1"
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT id, name, slug, user_id FROM workspace WHERE slug = ?",
+                (slug,),
+            )
         row = await cursor.fetchone()
         if not row:
             return None
         cols = [d[0] for d in cursor.description]
         ws = dict(zip(cols, row))
-        return {"id": ws["id"], "name": ws["name"], "slug": ws["name"]}
+        return {"id": ws["id"], "name": ws["name"], "slug": ws.get("slug") or _slugify(ws["name"])}
 
     async def list_knowledge_bases(self) -> list[dict]:
         db = self._db_or_raise()
         cursor = await db.execute(
-            "SELECT w.name, w.name as slug, "
-            "(SELECT count(*) FROM documents WHERE source_kind != 'wiki' AND status != 'failed') as source_count, "
-            "(SELECT count(*) FROM documents WHERE source_kind = 'wiki' AND status != 'failed') as wiki_count "
-            "FROM workspace w",
+            "SELECT w.id, w.name, COALESCE(w.slug, w.name) as slug, "
+            "(SELECT count(*) FROM documents d WHERE d.workspace_id = w.id AND d.source_kind != 'wiki' AND d.status != 'failed') as source_count, "
+            "(SELECT count(*) FROM documents d WHERE d.workspace_id = w.id AND d.source_kind = 'wiki' AND d.status != 'failed') as wiki_count "
+            "FROM workspace w ORDER BY w.created_at",
         )
         return _rows_to_dicts(cursor, await cursor.fetchall())
 
@@ -154,8 +273,8 @@ class SqliteVaultFS(VaultFS):
         cursor = await db.execute(
             "SELECT id, user_id, filename, title, path, content, tags, version, "
             "file_type, page_count, created_at, updated_at "
-            "FROM documents WHERE filename = ? AND path = ? AND status != 'failed'",
-            (filename, dir_path),
+            "FROM documents WHERE workspace_id = ? AND filename = ? AND path = ? AND status != 'failed'",
+            (kb_id, filename, dir_path),
         )
         rows = _rows_to_dicts(cursor, await cursor.fetchall())
         return rows[0] if rows else None
@@ -166,8 +285,8 @@ class SqliteVaultFS(VaultFS):
         cursor = await db.execute(
             "SELECT id, user_id, filename, title, path, content, tags, version, "
             "file_type, page_count, created_at, updated_at "
-            "FROM documents WHERE (lower(filename) = ? OR lower(title) = ?) AND status != 'failed'",
-            (name_lower, name_lower),
+            "FROM documents WHERE workspace_id = ? AND (lower(filename) = ? OR lower(title) = ?) AND status != 'failed'",
+            (kb_id, name_lower, name_lower),
         )
         rows = _rows_to_dicts(cursor, await cursor.fetchall())
         return rows[0] if rows else None
@@ -179,15 +298,18 @@ class SqliteVaultFS(VaultFS):
             relative_path = (dir_path.rstrip("/") + "/" + filename).lstrip("/")
             source_kind = "wiki" if dir_path.strip("/").startswith("wiki") else "source"
 
-            cursor = await db.execute("SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents")
+            cursor = await db.execute(
+                "SELECT COALESCE(MAX(document_number), 0) + 1 FROM documents WHERE workspace_id = ?",
+                (kb_id,),
+            )
             row = await cursor.fetchone()
             doc_number = row[0]
 
             await db.execute(
-                "INSERT INTO documents (id, user_id, filename, title, path, relative_path, source_kind, "
+                "INSERT INTO documents (id, workspace_id, user_id, filename, title, path, relative_path, source_kind, "
                 "file_type, status, content, tags, date, metadata, version, document_number) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, 0, ?)",
-                (doc_id, self.user_id, filename, title, dir_path, relative_path, source_kind,
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, 0, ?)",
+                (doc_id, kb_id, self.user_id, filename, title, dir_path, relative_path, source_kind,
                  file_type, content, json.dumps(tags), date,
                  json.dumps(metadata) if metadata else None, doc_number),
             )
@@ -240,7 +362,8 @@ class SqliteVaultFS(VaultFS):
         db = self._db_or_raise()
         cursor = await db.execute(
             "SELECT id, filename, title, path, file_type, tags, page_count, updated_at "
-            "FROM documents WHERE status != 'failed' ORDER BY path, filename",
+            "FROM documents WHERE workspace_id = ? AND status != 'failed' ORDER BY path, filename",
+            (kb_id,),
         )
         return _rows_to_dicts(cursor, await cursor.fetchall())
 
@@ -248,7 +371,8 @@ class SqliteVaultFS(VaultFS):
         db = self._db_or_raise()
         cursor = await db.execute(
             "SELECT id, filename, title, path, content, tags, file_type, page_count "
-            "FROM documents WHERE status != 'failed' ORDER BY path, filename",
+            "FROM documents WHERE workspace_id = ? AND status != 'failed' ORDER BY path, filename",
+            (kb_id,),
         )
         return _rows_to_dicts(cursor, await cursor.fetchall())
 
@@ -283,9 +407,9 @@ class SqliteVaultFS(VaultFS):
             "FROM document_chunks dc "
             "JOIN chunks_fts fts ON dc.rowid = fts.rowid "
             "JOIN documents d ON dc.document_id = d.id "
-            "WHERE chunks_fts MATCH ? AND d.status != 'failed' "
+            "WHERE chunks_fts MATCH ? AND d.workspace_id = ? AND d.status != 'failed' "
         )
-        params: list = [query]
+        params: list = [query, kb_id]
         if path_filter == "wiki":
             sql += "AND d.source_kind = 'wiki' "
         elif path_filter == "sources":
@@ -405,9 +529,10 @@ class SqliteVaultFS(VaultFS):
         cursor = await db.execute(
             "SELECT d.filename, d.title, d.path, d.file_type "
             "FROM documents d "
-            "WHERE d.source_kind != 'wiki' AND d.status != 'failed' "
+            "WHERE d.workspace_id = ? AND d.source_kind != 'wiki' AND d.status != 'failed' "
             "  AND d.id NOT IN (SELECT target_document_id FROM document_references WHERE reference_type = 'cites') "
             "ORDER BY d.filename",
+            (kb_id,),
         )
         return _rows_to_dicts(cursor, await cursor.fetchall())
 
@@ -416,8 +541,9 @@ class SqliteVaultFS(VaultFS):
         cursor = await db.execute(
             "SELECT d.filename, d.title, d.path, d.stale_since "
             "FROM documents d "
-            "WHERE d.status != 'failed' AND d.stale_since IS NOT NULL "
+            "WHERE d.workspace_id = ? AND d.status != 'failed' AND d.stale_since IS NOT NULL "
             "ORDER BY d.stale_since DESC",
+            (kb_id,),
         )
         return _rows_to_dicts(cursor, await cursor.fetchall())
 
@@ -435,8 +561,9 @@ class SqliteVaultFS(VaultFS):
             if row:
                 return row[0]
             ws_id = str(uuid.uuid4())
+            slug = _slugify(workspace_name)
             await db.execute(
-                "INSERT INTO workspace (id, name, description, user_id) VALUES (?, ?, '', ?)",
-                (ws_id, workspace_name, self.user_id),
+                "INSERT INTO workspace (id, name, slug, description, user_id) VALUES (?, ?, ?, '', ?)",
+                (ws_id, workspace_name, slug, self.user_id),
             )
             return ws_id
