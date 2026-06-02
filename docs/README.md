@@ -14,9 +14,10 @@ sphinx-build -b html docs docs/_build/html
 # open docs/_build/html/index.html
 ```
 
-`docs/requirements.txt` pulls in the runtime requirements of each
-documented package so `autodoc2` can import them. If a new top-level
-package is added to the repo, register it in two places:
+`sphinx-autodoc2` parses Python source statically (via AST), so the
+runtime dependencies of `api/`, `mcp/`, and `converter/` do **not** need
+to be installed to build the docs. If a new top-level package is added
+to the repo, register it in two places:
 
 1. `autodoc2_packages` in [`conf.py`](conf.py)
 2. The `toctree` in [`index.md`](index.md)

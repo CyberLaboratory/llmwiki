@@ -7,13 +7,9 @@ bundle so the docs are equally consumable by humans and LLMs.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-for pkg in ("api", "mcp", "converter"):
-    sys.path.insert(0, str(REPO_ROOT / pkg))
-sys.path.insert(0, str(REPO_ROOT))
 
 project = "llmwiki"
 author = "llmwiki contributors"
